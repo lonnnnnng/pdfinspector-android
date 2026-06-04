@@ -35,6 +35,7 @@ import compose.icons.tablericons.ArrowForwardUp
 import compose.icons.tablericons.AspectRatio
 import compose.icons.tablericons.ChevronLeft
 import compose.icons.tablericons.ChevronRight
+import compose.icons.tablericons.Copy
 import compose.icons.tablericons.DeviceFloppy
 import compose.icons.tablericons.Folder
 import compose.icons.tablericons.Maximize
@@ -50,6 +51,8 @@ fun InspectorToolbar(
     dirty: Boolean,
     canUndo: Boolean,
     canRedo: Boolean,
+    copyText: String?,
+    onCopyText: () -> Unit,
     onFitWidth: () -> Unit,
     onFitHeight: () -> Unit,
     onToggleFullscreen: () -> Unit,
@@ -76,17 +79,27 @@ fun InspectorToolbar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Text(
-                text = fileName,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 6.dp, end = 8.dp),
-            )
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = fileName,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .padding(start = 6.dp, end = 8.dp),
+                )
+                if (copyText != null) {
+                    IconButton(onClick = onCopyText) {
+                        Icon(TablerIcons.Copy, "Copy text", Modifier.size(20.dp))
+                    }
+                }
+            }
 
             FitMenuButton(onFitWidth = onFitWidth, onFitHeight = onFitHeight)
             IconButton(onClick = onToggleFullscreen) {
