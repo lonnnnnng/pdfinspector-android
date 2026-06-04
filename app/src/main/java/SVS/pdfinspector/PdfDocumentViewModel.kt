@@ -193,6 +193,17 @@ class PdfDocumentViewModel : ViewModel() {
         }
     }
 
+    fun closeDocument() {
+        closeRenderer()
+        document?.close()
+        document = null
+        parsed = null
+        clearHistory()
+        runCatching { cacheFile?.delete() }
+        cacheFile = null
+        state = PdfUiState()
+    }
+
     private suspend fun renderPage(index: Int) {
         val doc = document ?: return
         try {
