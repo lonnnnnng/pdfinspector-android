@@ -2,6 +2,7 @@ package SVS.pdfinspector
 
 import android.content.Context
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -12,8 +13,10 @@ import androidx.lifecycle.viewModelScope
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.rendering.PDFRenderer
 import SVS.pdfinspector.engine.ContentStreamEngine
+import SVS.pdfinspector.engine.ElementEditor
 import SVS.pdfinspector.engine.ParsedPage
 import SVS.pdfinspector.engine.collectGroupIds
+import SVS.pdfinspector.engine.findNode
 import SVS.pdfinspector.ui.PageTransform
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -76,6 +79,38 @@ class PdfDocumentViewModel : ViewModel() {
         state = state.copy(showRaw = !state.showRaw)
     }
 
+    fun deleteSelected() {
+        val doc = document ?: return
+        val parsedPage = parsed ?: return
+        val node = findNode(parsedPage.root, state.selectedId) ?: return
+        viewModelScope.launch {
+            state = state.copy(loading = true)
+            withContext(Dispatchers.IO) {
+                ElementEditor.deleteRange(
+                    doc, doc.getPage(state.pageIndex), parsedPage.tokens,
+                    node.startIndex, node.endIndex,
+                )
+            }
+            renderPage(state.pageIndex)
+            state = state.copy(loading = false, dirty = true)
+        }
+    }
+
+    fun saveCopy(context: Context, uri: Uri) {
+        val doc = document ?: return
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { doc.save(it) }
+                }
+                state = state.copy(dirty = false)
+                Toast.makeText(context, "Saved a copy", Toast.LENGTH_SHORT).show()
+            } catch (t: Throwable) {
+                state = state.copy(error = t.message ?: "Failed to save")
+            }
+        }
+    }
+
     private suspend fun renderPage(index: Int) {
         val doc = document ?: return
         val result = withContext(Dispatchers.IO) {
@@ -122,5 +157,6 @@ data class PdfUiState(
     val selectedId: Int? = null,
     val expanded: Set<Int> = emptySet(),
     val showRaw: Boolean = false,
+    val dirty: Boolean = false,
     val error: String? = null,
 )

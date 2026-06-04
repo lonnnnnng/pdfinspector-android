@@ -67,13 +67,23 @@ fun InspectorScreen(viewModel: PdfDocumentViewModel = viewModel()) {
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri -> uri?.let { viewModel.open(context, it) } }
 
+    val saveLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/pdf"),
+    ) { uri -> uri?.let { viewModel.saveCopy(context, it) } }
+
     fun pickPdf() = openLauncher.launch(arrayOf("application/pdf"))
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("PDF Inspector") },
-                actions = { TextButton(onClick = ::pickPdf) { Text("Open") } },
+                actions = {
+                    TextButton(
+                        onClick = { saveLauncher.launch("inspected.pdf") },
+                        enabled = state.dirty,
+                    ) { Text("Save") }
+                    TextButton(onClick = ::pickPdf) { Text("Open") }
+                },
             )
         },
     ) { padding ->
@@ -158,11 +168,11 @@ private fun PageViewer(viewModel: PdfDocumentViewModel) {
                 expanded = state.expanded,
                 selectedId = state.selectedId,
                 showRaw = state.showRaw,
-                canDelete = false,
+                canDelete = state.selectedId != null,
                 onSelect = { id -> viewModel.select(id) },
                 onToggleExpand = { id -> viewModel.toggleExpand(id) },
                 onToggleRaw = { viewModel.toggleRaw() },
-                onDelete = {},
+                onDelete = { viewModel.deleteSelected() },
                 modifier = Modifier.height(inspectorHeight),
             )
         }
