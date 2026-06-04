@@ -51,6 +51,7 @@ class PdfDocumentViewModel : ViewModel() {
                     pageCount = doc.numberOfPages,
                     pageIndex = 0,
                     fileName = displayName(context, uri),
+                    documentToken = state.documentToken + 1,
                 )
             } catch (t: Throwable) {
                 state = state.copy(loading = false, error = t.message ?: "Failed to open PDF")
@@ -169,5 +170,6 @@ data class PdfUiState(
     val expanded: Set<Int> = emptySet(),
     val showRaw: Boolean = false,
     val dirty: Boolean = false,
+    val documentToken: Int = 0,
     val error: String? = null,
 )

@@ -134,7 +134,7 @@ fun InspectorScreen(
 
     var fullscreen by remember { mutableStateOf(false) }
     var fitMode by remember { mutableStateOf(FitMode.WIDTH) }
-    LaunchedEffect(state.page) { fitMode = FitMode.WIDTH }
+    LaunchedEffect(state.documentToken) { fitMode = FitMode.WIDTH }
 
     LaunchedEffect(fullscreen) {
         val window = (context as? Activity)?.window ?: return@LaunchedEffect

@@ -42,8 +42,8 @@ fun PdfCanvas(
         val viewportW = constraints.maxWidth.toFloat()
         val viewportH = constraints.maxHeight.toFloat()
 
-        var scale by remember(bitmap) { mutableFloatStateOf(1f) }
-        var offset by remember(bitmap) { mutableStateOf(Offset.Zero) }
+        var scale by remember { mutableFloatStateOf(1f) }
+        var offset by remember { mutableStateOf(Offset.Zero) }
 
         fun fitWidth() {
             if (viewportW > 0f && bitmap.width > 0) {
@@ -61,12 +61,8 @@ fun PdfCanvas(
             }
         }
 
-        // New page: always reset to a sensible fit.
-        LaunchedEffect(bitmap) { fitWidth() }
-
-        // Viewport or fit-mode changes only re-fit while a fit mode is active;
-        // once the user has panned/zoomed (NONE), their view is left alone.
-        LaunchedEffect(viewportW, viewportH, fitMode) {
+        // Global zoom: kept across pages; only re-fit while a fit mode is active.
+        LaunchedEffect(bitmap, viewportW, viewportH, fitMode) {
             when (fitMode) {
                 FitMode.WIDTH -> fitWidth()
                 FitMode.HEIGHT -> fitHeight()
