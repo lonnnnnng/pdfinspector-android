@@ -50,6 +50,10 @@ object ContentStreamEngine {
         private var fontName = ""
         private var leading = 0f
         private val textPreview = StringBuilder()
+        private val textFull = StringBuilder()
+        private var textRuns = ArrayList<DrawNode>()
+        private var runBounds = Bounds.empty()
+        private val runText = StringBuilder()
 
         private var fillColor: Int? = null
         private var strokeColor: Int? = null
@@ -113,6 +117,8 @@ object ContentStreamEngine {
                     textLineMatrix = Affine.IDENTITY
                     textBounds = Bounds.empty()
                     textPreview.setLength(0)
+                    textFull.setLength(0)
+                    textRuns = ArrayList()
                 }
                 "ET" -> {
                     if (inText) emitText(opIndex)
@@ -133,15 +139,27 @@ object ContentStreamEngine {
                     textMatrix = textLineMatrix
                 }
                 "T*" -> moveTextLine(0f, -leading)
-                "Tj" -> showText(operands.lastOrNull() as? COSString)
-                "TJ" -> showArray(operands.lastOrNull() as? COSArray)
+                "Tj" -> {
+                    beginRun()
+                    showText(operands.lastOrNull() as? COSString)
+                    emitRun(op, opStart, opIndex)
+                }
+                "TJ" -> {
+                    beginRun()
+                    showArray(operands.lastOrNull() as? COSArray)
+                    emitRun(op, opStart, opIndex)
+                }
                 "'" -> {
                     moveTextLine(0f, -leading)
+                    beginRun()
                     showText(operands.lastOrNull() as? COSString)
+                    emitRun(op, opStart, opIndex)
                 }
                 "\"" -> if (operands.size >= 3) {
                     moveTextLine(0f, -leading)
+                    beginRun()
                     showText(operands[2] as? COSString)
+                    emitRun(op, opStart, opIndex)
                 }
                 "rg" -> fillColor = rgb(num(0), num(1), num(2))
                 "RG" -> strokeColor = rgb(num(0), num(1), num(2))
@@ -205,15 +223,21 @@ object ContentStreamEngine {
             if (s == null) return
             val bytes = s.bytes
             appendPreview(bytes)
+            appendFull(bytes)
             val w = bytes.size * fontSize * 0.5f
             val ascent = fontSize * 0.75f
             val descent = -fontSize * 0.25f
             val m = textMatrix.then(ctm())
-            textBounds.include(m.mapX(0f, descent), m.mapY(0f, descent))
-            textBounds.include(m.mapX(w, descent), m.mapY(w, descent))
-            textBounds.include(m.mapX(w, ascent), m.mapY(w, ascent))
-            textBounds.include(m.mapX(0f, ascent), m.mapY(0f, ascent))
+            includeQuad(textBounds, m, w, ascent, descent)
+            includeQuad(runBounds, m, w, ascent, descent)
             textMatrix = Affine.translate(w, 0f).then(textMatrix)
+        }
+
+        private fun includeQuad(b: Bounds, m: Affine, w: Float, ascent: Float, descent: Float) {
+            b.include(m.mapX(0f, descent), m.mapY(0f, descent))
+            b.include(m.mapX(w, descent), m.mapY(w, descent))
+            b.include(m.mapX(w, ascent), m.mapY(w, ascent))
+            b.include(m.mapX(0f, ascent), m.mapY(0f, ascent))
         }
 
         private fun showArray(a: COSArray?) {
@@ -227,6 +251,33 @@ object ContentStreamEngine {
                     }
                 }
             }
+        }
+
+        private fun beginRun() {
+            runBounds = Bounds.empty()
+            runText.setLength(0)
+        }
+
+        private fun emitRun(op: String, opStart: Int, opIndex: Int) {
+            if (!runBounds.isValid) return
+            val preview = runText.toString().trim().take(40)
+            val label = if (preview.isEmpty()) "Text" else "Text “$preview”"
+            val size = if (fontSize > 0f) "  ${fontSize.toInt()}pt" else ""
+            textRuns.add(
+                DrawNode(
+                    id = nextId++,
+                    kind = NodeKind.TEXT,
+                    label = label,
+                    detail = "$op  ${(fontName + size).trim()}".trim(),
+                    startIndex = opStart,
+                    endIndex = opIndex,
+                    bounds = runBounds,
+                    colorArgb = fillColor,
+                    raw = rawSlice(opStart, opIndex),
+                    children = emptyList(),
+                    text = runText.toString(),
+                ),
+            )
         }
 
         private fun emitText(endIndex: Int) {
@@ -245,7 +296,8 @@ object ContentStreamEngine {
                     bounds = textBounds,
                     colorArgb = fillColor,
                     raw = rawSlice(textStart, endIndex),
-                    children = emptyList(),
+                    children = textRuns,
+                    text = textFull.toString(),
                 ),
             )
         }
@@ -354,6 +406,16 @@ object ContentStreamEngine {
                 val v = byte.toInt() and 0xFF
                 if (v in 32..126) textPreview.append(v.toChar())
                 if (textPreview.length >= 40) break
+            }
+        }
+
+        private fun appendFull(bytes: ByteArray) {
+            for (byte in bytes) {
+                val v = byte.toInt() and 0xFF
+                if (v in 32..126) {
+                    textFull.append(v.toChar())
+                    runText.append(v.toChar())
+                }
             }
         }
 
