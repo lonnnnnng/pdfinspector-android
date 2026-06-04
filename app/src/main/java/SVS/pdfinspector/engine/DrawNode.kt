@@ -15,6 +15,7 @@ class DrawNode(
     val colorArgb: Int?,
     val raw: String,
     val children: List<DrawNode>,
+    val text: String? = null,
 )
 
 class ParsedPage(
