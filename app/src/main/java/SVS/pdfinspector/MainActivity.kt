@@ -30,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -80,7 +81,12 @@ class MainActivity : ComponentActivity() {
                 dynamicColor = themeState.dynamic,
                 accent = themeState.accent,
             ) {
-                InspectorScreen(initialUri = initialUri, themeState = themeState)
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background,
+                ) {
+                    InspectorScreen(initialUri = initialUri, themeState = themeState)
+                }
             }
         }
     }
