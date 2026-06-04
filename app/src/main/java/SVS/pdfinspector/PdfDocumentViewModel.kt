@@ -1,5 +1,7 @@
 package SVS.pdfinspector
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -97,6 +99,14 @@ class PdfDocumentViewModel : ViewModel() {
 
     fun select(id: Int?) {
         state = state.copy(selectedId = id)
+    }
+
+    fun copySelectedText(context: Context) {
+        val node = findNode(parsed?.root ?: return, state.selectedId) ?: return
+        val text = node.text ?: return
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("PDF text", text))
+        Toast.makeText(context, "Copied text", Toast.LENGTH_SHORT).show()
     }
 
     fun toggleExpand(id: Int) {
