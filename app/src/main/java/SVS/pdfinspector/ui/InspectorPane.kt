@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -20,6 +21,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,7 +74,14 @@ fun InspectorPane(
         HorizontalDivider()
 
         val rows = remember(page, expanded) { flatten(page.root, expanded) }
-        LazyColumn(Modifier.fillMaxWidth()) {
+        val listState = rememberLazyListState()
+        LaunchedEffect(selectedId, rows) {
+            if (selectedId != null) {
+                val index = rows.indexOfFirst { it.node.id == selectedId }
+                if (index >= 0) listState.animateScrollToItem(index)
+            }
+        }
+        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
             items(rows, key = { it.node.id }) { row ->
                 TreeRowItem(
                     row = row,

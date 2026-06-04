@@ -1,5 +1,7 @@
 package SVS.pdfinspector
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -27,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,9 +52,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val initialUri: Uri? = if (intent?.action == Intent.ACTION_VIEW) intent?.data else null
         setContent {
             InspectorTheme {
-                InspectorScreen()
+                InspectorScreen(initialUri = initialUri)
             }
         }
     }
@@ -59,9 +63,16 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun InspectorScreen(viewModel: PdfDocumentViewModel = viewModel()) {
+fun InspectorScreen(
+    initialUri: Uri? = null,
+    viewModel: PdfDocumentViewModel = viewModel(),
+) {
     val context = LocalContext.current
     val state = viewModel.state
+
+    LaunchedEffect(initialUri) {
+        if (initialUri != null) viewModel.open(context, initialUri)
+    }
 
     val openLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
