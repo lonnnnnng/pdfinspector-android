@@ -11,6 +11,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.rendering.PDFRenderer
+import SVS.pdfinspector.engine.ContentStreamEngine
+import SVS.pdfinspector.engine.ParsedPage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -21,6 +23,8 @@ class PdfDocumentViewModel : ViewModel() {
         private set
 
     private var document: PDDocument? = null
+    var parsed: ParsedPage? = null
+        private set
 
     fun open(context: Context, uri: Uri) {
         state = state.copy(loading = true, error = null)
@@ -59,10 +63,16 @@ class PdfDocumentViewModel : ViewModel() {
 
     private suspend fun renderPage(index: Int) {
         val doc = document ?: return
-        val bitmap = withContext(Dispatchers.IO) {
-            PDFRenderer(doc).renderImageWithDPI(index, RENDER_DPI)
+        val result = withContext(Dispatchers.IO) {
+            val bmp = PDFRenderer(doc).renderImageWithDPI(index, RENDER_DPI)
+            val parsedPage = ContentStreamEngine.parse(doc.getPage(index))
+            bmp to parsedPage
         }
-        state = state.copy(bitmap = bitmap.asImageBitmap())
+        parsed = result.second
+        state = state.copy(
+            bitmap = result.first.asImageBitmap(),
+            elementCount = result.second.leaves.size,
+        )
     }
 
     override fun onCleared() {
@@ -81,5 +91,6 @@ data class PdfUiState(
     val bitmap: ImageBitmap? = null,
     val pageIndex: Int = 0,
     val pageCount: Int = 0,
+    val elementCount: Int = 0,
     val error: String? = null,
 )

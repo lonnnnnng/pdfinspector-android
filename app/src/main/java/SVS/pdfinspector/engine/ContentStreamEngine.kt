@@ -1,0 +1,416 @@
+package SVS.pdfinspector.engine
+
+import com.tom_roush.pdfbox.contentstream.operator.Operator
+import com.tom_roush.pdfbox.cos.COSArray
+import com.tom_roush.pdfbox.cos.COSBase
+import com.tom_roush.pdfbox.cos.COSBoolean
+import com.tom_roush.pdfbox.cos.COSName
+import com.tom_roush.pdfbox.cos.COSNumber
+import com.tom_roush.pdfbox.cos.COSString
+import com.tom_roush.pdfbox.pdfparser.PDFStreamParser
+import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.PDResources
+import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
+
+object ContentStreamEngine {
+
+    fun parse(page: PDPage): ParsedPage {
+        val tokens = readTokens(page)
+        return Builder(tokens, page.resources).build()
+    }
+
+    private fun readTokens(page: PDPage): List<Any> {
+        val parser = PDFStreamParser(page)
+        parser.parse()
+        return ArrayList<Any>(parser.tokens)
+    }
+
+    private class Builder(val tokens: List<Any>, val resources: PDResources?) {
+
+        private var nextId = 1
+        private val rootChildren = ArrayList<DrawNode>()
+        private val leaves = ArrayList<DrawNode>()
+
+        private val groupStack = ArrayDeque<GroupFrame>()
+        private val ctmStack = ArrayDeque<Affine>().apply { addLast(Affine.IDENTITY) }
+
+        private val operands = ArrayList<COSBase>()
+        private var runStart = -1
+
+        private var pathBounds: Bounds? = null
+        private var pathStart = -1
+
+        private var inText = false
+        private var textStart = -1
+        private var textBounds = Bounds.empty()
+        private var textMatrix = Affine.IDENTITY
+        private var textLineMatrix = Affine.IDENTITY
+        private var fontSize = 0f
+        private var fontName = ""
+        private var leading = 0f
+        private val textPreview = StringBuilder()
+
+        private var fillColor: Int? = null
+        private var strokeColor: Int? = null
+
+        private class GroupFrame(val openIndex: Int, val children: MutableList<DrawNode> = ArrayList())
+
+        fun build(): ParsedPage {
+            for (i in tokens.indices) {
+                when (val tok = tokens[i]) {
+                    is Operator -> {
+                        val start = if (operands.isEmpty()) i else runStart
+                        handle(tok.name, i, start)
+                        operands.clear()
+                        runStart = -1
+                    }
+                    is COSBase -> {
+                        if (operands.isEmpty()) runStart = i
+                        operands.add(tok)
+                    }
+                }
+            }
+            while (groupStack.isNotEmpty()) closeGroup(tokens.lastIndex)
+
+            val rootBounds = Bounds.empty()
+            for (c in rootChildren) c.bounds?.let { rootBounds.includeBounds(it) }
+            val root = DrawNode(
+                id = 0,
+                kind = NodeKind.GROUP,
+                label = "Page",
+                detail = "${rootChildren.size} top-level items",
+                startIndex = 0,
+                endIndex = tokens.lastIndex,
+                bounds = if (rootBounds.isValid) rootBounds else null,
+                colorArgb = null,
+                raw = "",
+                children = rootChildren,
+            )
+            return ParsedPage(tokens, root, leaves)
+        }
+
+        private fun currentChildren(): MutableList<DrawNode> =
+            if (groupStack.isEmpty()) rootChildren else groupStack.last().children
+
+        private fun ctm(): Affine = ctmStack.last()
+
+        private fun handle(op: String, opIndex: Int, opStart: Int) {
+            when (op) {
+                "q" -> {
+                    groupStack.addLast(GroupFrame(opIndex))
+                    ctmStack.addLast(ctm())
+                }
+                "Q" -> closeGroup(opIndex)
+                "cm" -> if (operands.size >= 6) {
+                    val old = ctmStack.removeLast()
+                    ctmStack.addLast(affine(0).then(old))
+                }
+                "BT" -> {
+                    inText = true
+                    textStart = opIndex
+                    textMatrix = Affine.IDENTITY
+                    textLineMatrix = Affine.IDENTITY
+                    textBounds = Bounds.empty()
+                    textPreview.setLength(0)
+                }
+                "ET" -> {
+                    if (inText) emitText(opIndex)
+                    inText = false
+                }
+                "Tf" -> if (operands.size >= 2) {
+                    fontName = (operands[0] as? COSName)?.name ?: fontName
+                    fontSize = num(1)
+                }
+                "TL" -> if (operands.isNotEmpty()) leading = num(0)
+                "Td" -> if (operands.size >= 2) moveTextLine(num(0), num(1))
+                "TD" -> if (operands.size >= 2) {
+                    leading = -num(1)
+                    moveTextLine(num(0), num(1))
+                }
+                "Tm" -> if (operands.size >= 6) {
+                    textLineMatrix = affine(0)
+                    textMatrix = textLineMatrix
+                }
+                "T*" -> moveTextLine(0f, -leading)
+                "Tj" -> showText(operands.lastOrNull() as? COSString)
+                "TJ" -> showArray(operands.lastOrNull() as? COSArray)
+                "'" -> {
+                    moveTextLine(0f, -leading)
+                    showText(operands.lastOrNull() as? COSString)
+                }
+                "\"" -> if (operands.size >= 3) {
+                    moveTextLine(0f, -leading)
+                    showText(operands[2] as? COSString)
+                }
+                "rg" -> fillColor = rgb(num(0), num(1), num(2))
+                "RG" -> strokeColor = rgb(num(0), num(1), num(2))
+                "g" -> fillColor = rgb(num(0), num(0), num(0))
+                "G" -> strokeColor = rgb(num(0), num(0), num(0))
+                "k" -> fillColor = cmyk(num(0), num(1), num(2), num(3))
+                "K" -> strokeColor = cmyk(num(0), num(1), num(2), num(3))
+                "m", "l" -> if (operands.size >= 2) {
+                    beginPath(opStart)
+                    addPoint(num(0), num(1))
+                }
+                "c" -> if (operands.size >= 6) {
+                    beginPath(opStart)
+                    addPoint(num(0), num(1)); addPoint(num(2), num(3)); addPoint(num(4), num(5))
+                }
+                "v", "y" -> if (operands.size >= 4) {
+                    beginPath(opStart)
+                    addPoint(num(0), num(1)); addPoint(num(2), num(3))
+                }
+                "re" -> if (operands.size >= 4) {
+                    beginPath(opStart)
+                    val x = num(0); val y = num(1); val w = num(2); val h = num(3)
+                    addPoint(x, y); addPoint(x + w, y); addPoint(x + w, y + h); addPoint(x, y + h)
+                }
+                "f", "F", "f*", "S", "s", "B", "B*", "b", "b*" -> endPath(op, opIndex)
+                "n" -> {
+                    pathBounds = null
+                    pathStart = -1
+                }
+                "Do" -> doXObject(operands.lastOrNull() as? COSName, opStart, opIndex)
+            }
+        }
+
+        private fun closeGroup(closeIndex: Int) {
+            if (groupStack.isEmpty()) return
+            val frame = groupStack.removeLast()
+            if (ctmStack.size > 1) ctmStack.removeLast()
+            val bounds = Bounds.empty()
+            for (c in frame.children) c.bounds?.let { bounds.includeBounds(it) }
+            val node = DrawNode(
+                id = nextId++,
+                kind = NodeKind.GROUP,
+                label = "Group",
+                detail = "${frame.children.size} items",
+                startIndex = frame.openIndex,
+                endIndex = closeIndex,
+                bounds = if (bounds.isValid) bounds else null,
+                colorArgb = null,
+                raw = rawSlice(frame.openIndex, minOf(frame.openIndex + 1, closeIndex)),
+                children = frame.children,
+            )
+            currentChildren().add(node)
+        }
+
+        private fun moveTextLine(tx: Float, ty: Float) {
+            textLineMatrix = Affine.translate(tx, ty).then(textLineMatrix)
+            textMatrix = textLineMatrix
+        }
+
+        private fun showText(s: COSString?) {
+            if (s == null) return
+            val bytes = s.bytes
+            appendPreview(bytes)
+            val w = bytes.size * fontSize * 0.5f
+            val ascent = fontSize * 0.75f
+            val descent = -fontSize * 0.25f
+            val m = textMatrix.then(ctm())
+            textBounds.include(m.mapX(0f, descent), m.mapY(0f, descent))
+            textBounds.include(m.mapX(w, descent), m.mapY(w, descent))
+            textBounds.include(m.mapX(w, ascent), m.mapY(w, ascent))
+            textBounds.include(m.mapX(0f, ascent), m.mapY(0f, ascent))
+            textMatrix = Affine.translate(w, 0f).then(textMatrix)
+        }
+
+        private fun showArray(a: COSArray?) {
+            if (a == null) return
+            for (i in 0 until a.size()) {
+                when (val el = a.getObject(i)) {
+                    is COSString -> showText(el)
+                    is COSNumber -> {
+                        val tx = -el.floatValue() / 1000f * fontSize
+                        textMatrix = Affine.translate(tx, 0f).then(textMatrix)
+                    }
+                }
+            }
+        }
+
+        private fun emitText(endIndex: Int) {
+            if (!textBounds.isValid) return
+            val preview = textPreview.toString().trim()
+            val label = if (preview.isEmpty()) "Text" else "Text “$preview”"
+            val size = if (fontSize > 0f) "  ${fontSize.toInt()}pt" else ""
+            addLeaf(
+                DrawNode(
+                    id = nextId++,
+                    kind = NodeKind.TEXT,
+                    label = label,
+                    detail = (fontName + size).trim(),
+                    startIndex = textStart,
+                    endIndex = endIndex,
+                    bounds = textBounds,
+                    colorArgb = fillColor,
+                    raw = rawSlice(textStart, endIndex),
+                    children = emptyList(),
+                ),
+            )
+        }
+
+        private fun beginPath(start: Int) {
+            if (pathBounds == null) {
+                pathBounds = Bounds.empty()
+                pathStart = start
+            }
+        }
+
+        private fun addPoint(x: Float, y: Float) {
+            pathBounds?.include(ctm().mapX(x, y), ctm().mapY(x, y))
+        }
+
+        private fun endPath(op: String, endIndex: Int) {
+            val b = pathBounds
+            if (b != null && b.isValid) {
+                val stroked = op == "S" || op == "s"
+                val label = when {
+                    op == "S" || op == "s" -> "Path stroke"
+                    op.startsWith("B") || op.startsWith("b") -> "Path fill+stroke"
+                    else -> "Path fill"
+                }
+                addLeaf(
+                    DrawNode(
+                        id = nextId++,
+                        kind = NodeKind.PATH,
+                        label = label,
+                        detail = "${b.width.toInt()}×${b.height.toInt()}",
+                        startIndex = pathStart,
+                        endIndex = endIndex,
+                        bounds = b,
+                        colorArgb = if (stroked) strokeColor else fillColor,
+                        raw = rawSlice(pathStart, endIndex),
+                        children = emptyList(),
+                    ),
+                )
+            }
+            pathBounds = null
+            pathStart = -1
+        }
+
+        private fun doXObject(name: COSName?, start: Int, endIndex: Int) {
+            if (name == null) return
+            val n = name.name
+            var kind = NodeKind.IMAGE
+            var label = "Image"
+            var detail = n
+            var bounds = unitSquare()
+            try {
+                when (val x = resources?.getXObject(name)) {
+                    is PDImageXObject -> detail = "$n  ${x.width}×${x.height}"
+                    is PDFormXObject -> {
+                        label = "Form"
+                        formBounds(x)?.let { bounds = it }
+                    }
+                    else -> {}
+                }
+            } catch (_: Exception) {
+            }
+            addLeaf(
+                DrawNode(
+                    id = nextId++,
+                    kind = kind,
+                    label = label,
+                    detail = detail,
+                    startIndex = start,
+                    endIndex = endIndex,
+                    bounds = bounds,
+                    colorArgb = null,
+                    raw = rawSlice(start, endIndex),
+                    children = emptyList(),
+                ),
+            )
+        }
+
+        private fun unitSquare(): Bounds {
+            val b = Bounds.empty()
+            val m = ctm()
+            b.include(m.mapX(0f, 0f), m.mapY(0f, 0f))
+            b.include(m.mapX(1f, 0f), m.mapY(1f, 0f))
+            b.include(m.mapX(1f, 1f), m.mapY(1f, 1f))
+            b.include(m.mapX(0f, 1f), m.mapY(0f, 1f))
+            return b
+        }
+
+        private fun formBounds(form: PDFormXObject): Bounds? {
+            val r = form.bBox ?: return null
+            val m = ctm()
+            val b = Bounds.empty()
+            val xs = floatArrayOf(r.lowerLeftX, r.upperRightX)
+            val ys = floatArrayOf(r.lowerLeftY, r.upperRightY)
+            for (x in xs) for (y in ys) b.include(m.mapX(x, y), m.mapY(x, y))
+            return if (b.isValid) b else null
+        }
+
+        private fun addLeaf(node: DrawNode) {
+            currentChildren().add(node)
+            leaves.add(node)
+        }
+
+        private fun appendPreview(bytes: ByteArray) {
+            if (textPreview.length >= 40) return
+            for (byte in bytes) {
+                val v = byte.toInt() and 0xFF
+                if (v in 32..126) textPreview.append(v.toChar())
+                if (textPreview.length >= 40) break
+            }
+        }
+
+        private fun num(i: Int): Float = (operands.getOrNull(i) as? COSNumber)?.floatValue() ?: 0f
+
+        private fun affine(start: Int): Affine =
+            Affine(num(start), num(start + 1), num(start + 2), num(start + 3), num(start + 4), num(start + 5))
+
+        private fun rawSlice(start: Int, end: Int): String {
+            val sb = StringBuilder()
+            var i = start
+            while (i <= end && i < tokens.size) {
+                if (sb.isNotEmpty()) sb.append(' ')
+                sb.append(cosToString(tokens[i]))
+                if (sb.length > 220) {
+                    sb.append(" …")
+                    break
+                }
+                i++
+            }
+            return sb.toString()
+        }
+    }
+
+    private fun cosToString(o: Any?): String = when (o) {
+        is COSName -> "/" + o.name
+        is COSString -> "(" + asciiOf(o.bytes) + ")"
+        is COSArray -> "[" + (0 until o.size()).joinToString(" ") { cosToString(o.getObject(it)) } + "]"
+        is COSNumber -> formatNumber(o.floatValue())
+        is COSBoolean -> o.value.toString()
+        is Operator -> o.name
+        else -> o?.toString() ?: ""
+    }
+
+    private fun asciiOf(bytes: ByteArray): String {
+        val sb = StringBuilder()
+        for (byte in bytes) {
+            val v = byte.toInt() and 0xFF
+            sb.append(if (v in 32..126) v.toChar() else '·')
+            if (sb.length > 32) {
+                sb.append('…')
+                break
+            }
+        }
+        return sb.toString()
+    }
+
+    private fun formatNumber(v: Float): String =
+        if (v == v.toLong().toFloat()) v.toLong().toString() else String.format("%.2f", v)
+
+    private fun rgb(r: Float, g: Float, b: Float): Int {
+        val ri = (r * 255f).toInt().coerceIn(0, 255)
+        val gi = (g * 255f).toInt().coerceIn(0, 255)
+        val bi = (b * 255f).toInt().coerceIn(0, 255)
+        return (0xFF shl 24) or (ri shl 16) or (gi shl 8) or bi
+    }
+
+    private fun cmyk(c: Float, m: Float, y: Float, k: Float): Int =
+        rgb((1f - c) * (1f - k), (1f - m) * (1f - k), (1f - y) * (1f - k))
+}

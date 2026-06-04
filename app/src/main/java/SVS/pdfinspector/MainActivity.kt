@@ -123,7 +123,7 @@ private fun PageBar(state: PdfUiState, onPage: (Int) -> Unit) {
             onClick = { onPage(state.pageIndex - 1) },
             enabled = state.pageIndex > 0,
         ) { Text("Prev") }
-        Text("Page ${state.pageIndex + 1} / ${state.pageCount}")
+        Text("Page ${state.pageIndex + 1}/${state.pageCount}  ·  ${state.elementCount} elements")
         TextButton(
             onClick = { onPage(state.pageIndex + 1) },
             enabled = state.pageIndex < state.pageCount - 1,
