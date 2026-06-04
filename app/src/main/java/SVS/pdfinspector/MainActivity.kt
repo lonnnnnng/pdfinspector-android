@@ -57,6 +57,7 @@ import compose.icons.TablerIcons
 import compose.icons.tablericons.FileText
 import compose.icons.tablericons.Folder
 import compose.icons.tablericons.Settings
+import SVS.pdfinspector.engine.NodeKind
 import SVS.pdfinspector.engine.findNode
 import SVS.pdfinspector.ui.Dock
 import SVS.pdfinspector.ui.FitMode
@@ -154,6 +155,11 @@ fun InspectorScreen(
         viewModel.closeDocument()
     }
 
+    val copyText = state.page
+        ?.let { findNode(it.root, state.selectedId) }
+        ?.takeIf { it.kind == NodeKind.TEXT }
+        ?.text
+
     if (state.hasDocument) {
         Scaffold(
             topBar = {
@@ -165,6 +171,8 @@ fun InspectorScreen(
                     dirty = state.dirty,
                     canUndo = state.canUndo,
                     canRedo = state.canRedo,
+                    copyText = copyText,
+                    onCopyText = { viewModel.copySelectedText(context) },
                     onFitWidth = { fitMode = FitMode.WIDTH },
                     onFitHeight = { fitMode = FitMode.HEIGHT },
                     onToggleFullscreen = { fullscreen = !fullscreen },
