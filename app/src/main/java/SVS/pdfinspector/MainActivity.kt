@@ -1,5 +1,6 @@
 package SVS.pdfinspector
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -12,20 +13,21 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -41,18 +43,30 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import compose.icons.TablerIcons
+import compose.icons.tablericons.FileText
+import compose.icons.tablericons.Folder
+import compose.icons.tablericons.Settings
 import SVS.pdfinspector.engine.findNode
 import SVS.pdfinspector.ui.Dock
+import SVS.pdfinspector.ui.FitMode
 import SVS.pdfinspector.ui.InspectorDock
 import SVS.pdfinspector.ui.InspectorPane
 import SVS.pdfinspector.ui.InspectorToolbar
 import SVS.pdfinspector.ui.LeafRect
 import SVS.pdfinspector.ui.PdfCanvas
-import SVS.pdfinspector.ui.Tool
+import SVS.pdfinspector.ui.ThemeSettingsSheet
 import SVS.pdfinspector.ui.theme.InspectorTheme
+import SVS.pdfinspector.ui.theme.ThemeState
+import SVS.pdfinspector.ui.theme.rememberThemeState
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,8 +74,13 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val initialUri: Uri? = if (intent?.action == Intent.ACTION_VIEW) intent?.data else null
         setContent {
-            InspectorTheme {
-                InspectorScreen(initialUri = initialUri)
+            val themeState = rememberThemeState()
+            InspectorTheme(
+                mode = themeState.mode,
+                dynamicColor = themeState.dynamic,
+                accent = themeState.accent,
+            ) {
+                InspectorScreen(initialUri = initialUri, themeState = themeState)
             }
         }
     }
@@ -70,10 +89,13 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun InspectorScreen(
     initialUri: Uri? = null,
+    themeState: ThemeState,
     viewModel: PdfDocumentViewModel = viewModel(),
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
     val state = viewModel.state
+    var showSettings by remember { mutableStateOf(false) }
 
     LaunchedEffect(initialUri) {
         if (initialUri != null) viewModel.open(context, initialUri)
@@ -104,44 +126,84 @@ fun InspectorScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            InspectorToolbar(
-                tool = state.tool,
-                hasDocument = state.hasDocument,
-                pageIndex = state.pageIndex,
-                pageCount = state.pageCount,
-                dirty = state.dirty,
-                onTool = { viewModel.setTool(it) },
-                onPrev = { viewModel.showPage(state.pageIndex - 1) },
-                onNext = { viewModel.showPage(state.pageIndex + 1) },
-                onOpen = { pickPdf() },
-                onSave = { saveLauncher.launch("inspected.pdf") },
-            )
-        },
-    ) { inner ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(inner),
-            contentAlignment = Alignment.Center,
-        ) {
-            when {
-                state.loading && state.bitmap == null -> CircularProgressIndicator()
-                state.error != null -> Text("Error: ${state.error}")
-                state.hasDocument -> Workspace(
+    var fullscreen by remember { mutableStateOf(false) }
+    var fitMode by remember { mutableStateOf(FitMode.WIDTH) }
+    LaunchedEffect(state.page) { fitMode = FitMode.WIDTH }
+
+    LaunchedEffect(fullscreen) {
+        val window = (context as? Activity)?.window ?: return@LaunchedEffect
+        val controller = WindowCompat.getInsetsController(window, view)
+        if (fullscreen) {
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    if (state.hasDocument) {
+        Scaffold(
+            topBar = {
+                InspectorToolbar(
+                    fileName = state.fileName,
+                    fullscreen = fullscreen,
+                    pageIndex = state.pageIndex,
+                    pageCount = state.pageCount,
+                    dirty = state.dirty,
+                    onFitWidth = { fitMode = FitMode.WIDTH },
+                    onFitHeight = { fitMode = FitMode.HEIGHT },
+                    onToggleFullscreen = { fullscreen = !fullscreen },
+                    onPrev = { viewModel.showPage(state.pageIndex - 1) },
+                    onNext = { viewModel.showPage(state.pageIndex + 1) },
+                    onOpen = { pickPdf() },
+                    onSave = { saveLauncher.launch("inspected.pdf") },
+                    onSettings = { showSettings = true },
+                )
+            },
+        ) { inner ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(inner),
+            ) {
+                Workspace(
                     viewModel = viewModel,
                     state = state,
                     dock = dock,
                     transparent = transparent,
                     sizeDp = sizeDp,
                     onResize = onResize,
+                    fitMode = fitMode,
+                    onUserTransform = { fitMode = FitMode.NONE },
                     onToggleDock = { dock = if (dock == Dock.BOTTOM) Dock.SIDE else Dock.BOTTOM },
                     onToggleTransparent = { transparent = !transparent },
                 )
-                else -> EmptyState(onOpen = ::pickPdf)
             }
         }
+    } else {
+        Box(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                when {
+                    state.loading -> CircularProgressIndicator()
+                    state.error != null -> Text("Error: ${state.error}")
+                    else -> EmptyState(onOpen = ::pickPdf)
+                }
+            }
+            IconButton(
+                onClick = { showSettings = true },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(8.dp),
+            ) {
+                Icon(TablerIcons.Settings, contentDescription = "Settings", modifier = Modifier.size(22.dp))
+            }
+        }
+    }
+
+    if (showSettings) {
+        ThemeSettingsSheet(theme = themeState, onDismiss = { showSettings = false })
     }
 }
 
@@ -151,8 +213,10 @@ private fun Workspace(
     state: PdfUiState,
     dock: Dock,
     transparent: Boolean,
-    sizeDp: androidx.compose.ui.unit.Dp,
+    sizeDp: Dp,
     onResize: (Float) -> Unit,
+    fitMode: FitMode,
+    onUserTransform: () -> Unit,
     onToggleDock: () -> Unit,
     onToggleTransparent: () -> Unit,
 ) {
@@ -184,7 +248,8 @@ private fun Workspace(
                 selectedRect = selectedRect,
                 highlightColor = highlight,
                 backdropColor = backdrop,
-                selectable = state.tool == Tool.SELECT,
+                fitMode = fitMode,
+                onUserTransform = onUserTransform,
                 onSelect = { id -> viewModel.select(id) },
                 modifier = mod,
             )
@@ -251,7 +316,7 @@ private fun EmptyState(onOpen: () -> Unit) {
         modifier = Modifier.padding(24.dp),
     ) {
         Icon(
-            imageVector = Icons.Filled.PictureAsPdf,
+            imageVector = TablerIcons.FileText,
             contentDescription = null,
             modifier = Modifier.size(72.dp),
             tint = MaterialTheme.colorScheme.primary,
@@ -268,7 +333,7 @@ private fun EmptyState(onOpen: () -> Unit) {
         )
         Spacer(Modifier.height(20.dp))
         FilledTonalButton(onClick = onOpen) {
-            Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+            Icon(TablerIcons.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text("Open a PDF")
         }

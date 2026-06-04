@@ -14,12 +14,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.HorizontalSplit
-import androidx.compose.material.icons.filled.Opacity
-import androidx.compose.material.icons.filled.VerticalSplit
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -38,6 +32,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import compose.icons.TablerIcons
+import compose.icons.tablericons.Code
+import compose.icons.tablericons.Droplet
+import compose.icons.tablericons.LayoutBottombar
+import compose.icons.tablericons.LayoutSidebarRight
+import compose.icons.tablericons.Trash
 import SVS.pdfinspector.engine.DrawNode
 import SVS.pdfinspector.engine.NodeKind
 import SVS.pdfinspector.engine.ParsedPage
@@ -74,24 +74,34 @@ fun InspectorPane(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text("Inspector", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Inspector",
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 Text(
                     "${page.leaves.size} elements",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             IconToggleButton(checked = showRaw, onCheckedChange = { onToggleRaw() }) {
-                Icon(Icons.Filled.Code, contentDescription = "Toggle raw operators")
+                Icon(TablerIcons.Code, "Toggle raw operators", Modifier.size(20.dp))
             }
             IconButton(onClick = onToggleDock) {
                 Icon(
-                    imageVector = if (dock == Dock.BOTTOM) Icons.Filled.VerticalSplit else Icons.Filled.HorizontalSplit,
+                    imageVector = if (dock == Dock.BOTTOM) TablerIcons.LayoutSidebarRight else TablerIcons.LayoutBottombar,
                     contentDescription = "Dock side or bottom",
+                    modifier = Modifier.size(20.dp),
                 )
             }
             IconToggleButton(checked = transparent, onCheckedChange = { onToggleTransparent() }) {
-                Icon(Icons.Filled.Opacity, contentDescription = "Toggle transparency")
+                Icon(TablerIcons.Droplet, "Toggle transparency", Modifier.size(20.dp))
             }
             FilledTonalIconButton(
                 onClick = onDelete,
@@ -101,7 +111,7 @@ fun InspectorPane(
                     contentColor = MaterialTheme.colorScheme.onErrorContainer,
                 ),
             ) {
-                Icon(Icons.Filled.Delete, contentDescription = "Delete element")
+                Icon(TablerIcons.Trash, "Delete element", Modifier.size(20.dp))
             }
         }
         HorizontalDivider()

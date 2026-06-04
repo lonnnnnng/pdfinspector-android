@@ -33,7 +33,8 @@ fun PdfCanvas(
     selectedRect: Rect?,
     highlightColor: Color,
     backdropColor: Color,
-    selectable: Boolean,
+    fitMode: FitMode,
+    onUserTransform: () -> Unit,
     onSelect: (Int?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -44,11 +45,32 @@ fun PdfCanvas(
         var scale by remember(bitmap) { mutableFloatStateOf(1f) }
         var offset by remember(bitmap) { mutableStateOf(Offset.Zero) }
 
-        LaunchedEffect(bitmap, viewportW, viewportH) {
+        fun fitWidth() {
             if (viewportW > 0f && bitmap.width > 0) {
-                val fit = viewportW / bitmap.width
-                scale = fit
-                offset = Offset(0f, ((viewportH - bitmap.height * fit) / 2f).coerceAtLeast(0f))
+                val s = viewportW / bitmap.width
+                scale = s
+                offset = Offset(0f, ((viewportH - bitmap.height * s) / 2f).coerceAtLeast(0f))
+            }
+        }
+
+        fun fitHeight() {
+            if (viewportH > 0f && bitmap.height > 0) {
+                val s = viewportH / bitmap.height
+                scale = s
+                offset = Offset(((viewportW - bitmap.width * s) / 2f).coerceAtLeast(0f), 0f)
+            }
+        }
+
+        // New page: always reset to a sensible fit.
+        LaunchedEffect(bitmap) { fitWidth() }
+
+        // Viewport or fit-mode changes only re-fit while a fit mode is active;
+        // once the user has panned/zoomed (NONE), their view is left alone.
+        LaunchedEffect(viewportW, viewportH, fitMode) {
+            when (fitMode) {
+                FitMode.WIDTH -> fitWidth()
+                FitMode.HEIGHT -> fitHeight()
+                FitMode.NONE -> Unit
             }
         }
 
@@ -57,14 +79,14 @@ fun PdfCanvas(
                 .fillMaxSize()
                 .pointerInput(bitmap) {
                     detectTransformGestures { centroid, pan, zoom, _ ->
+                        if (zoom != 1f || pan != Offset.Zero) onUserTransform()
                         val newScale = (scale * zoom).coerceIn(MIN_SCALE, MAX_SCALE)
                         offset = centroid - (centroid - offset) * (newScale / scale) + pan
                         scale = newScale
                     }
                 }
-                .pointerInput(bitmap, leaves, selectable) {
+                .pointerInput(bitmap, leaves) {
                     detectTapGestures { tap ->
-                        if (!selectable) return@detectTapGestures
                         val point = Offset((tap.x - offset.x) / scale, (tap.y - offset.y) / scale)
                         val hit = leaves.lastOrNull { it.rect.contains(point) }
                         onSelect(hit?.id)

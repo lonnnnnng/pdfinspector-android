@@ -2,6 +2,7 @@ package SVS.pdfinspector
 
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -18,7 +19,6 @@ import SVS.pdfinspector.engine.ParsedPage
 import SVS.pdfinspector.engine.collectGroupIds
 import SVS.pdfinspector.engine.findNode
 import SVS.pdfinspector.ui.PageTransform
-import SVS.pdfinspector.ui.Tool
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -50,6 +50,7 @@ class PdfDocumentViewModel : ViewModel() {
                     hasDocument = true,
                     pageCount = doc.numberOfPages,
                     pageIndex = 0,
+                    fileName = displayName(context, uri),
                 )
             } catch (t: Throwable) {
                 state = state.copy(loading = false, error = t.message ?: "Failed to open PDF")
@@ -65,10 +66,6 @@ class PdfDocumentViewModel : ViewModel() {
             renderPage(index)
             state = state.copy(loading = false, pageIndex = index)
         }
-    }
-
-    fun setTool(tool: Tool) {
-        state = state.copy(tool = tool)
     }
 
     fun select(id: Int?) {
@@ -140,6 +137,14 @@ class PdfDocumentViewModel : ViewModel() {
         )
     }
 
+    private fun displayName(context: Context, uri: Uri): String {
+        val fromResolver = runCatching {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+        }.getOrNull()
+        return fromResolver ?: uri.lastPathSegment?.substringAfterLast('/') ?: "document.pdf"
+    }
+
     override fun onCleared() {
         document?.close()
         document = null
@@ -157,12 +162,12 @@ data class PdfUiState(
     val pageIndex: Int = 0,
     val pageCount: Int = 0,
     val elementCount: Int = 0,
+    val fileName: String = "",
     val page: ParsedPage? = null,
     val pageTransform: PageTransform? = null,
     val selectedId: Int? = null,
     val expanded: Set<Int> = emptySet(),
     val showRaw: Boolean = false,
     val dirty: Boolean = false,
-    val tool: Tool = Tool.SELECT,
     val error: String? = null,
 )
