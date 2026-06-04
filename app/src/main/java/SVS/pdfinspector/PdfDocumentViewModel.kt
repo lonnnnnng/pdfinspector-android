@@ -1,8 +1,13 @@
 package SVS.pdfinspector
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -21,7 +26,10 @@ import SVS.pdfinspector.engine.findNode
 import SVS.pdfinspector.ui.PageTransform
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.File
 
 class PdfDocumentViewModel : ViewModel() {
 
@@ -32,28 +40,39 @@ class PdfDocumentViewModel : ViewModel() {
     var parsed: ParsedPage? = null
         private set
 
+    private var pdfRenderer: PdfRenderer? = null
+    private var pfd: ParcelFileDescriptor? = null
+    private var cacheFile: File? = null
+    private val renderMutex = Mutex()
+
     fun open(context: Context, uri: Uri) {
         state = state.copy(loading = true, error = null)
         viewModelScope.launch {
             try {
-                val doc = withContext(Dispatchers.IO) {
-                    context.contentResolver.openInputStream(uri).use { input ->
-                        requireNotNull(input) { "Cannot open the selected file" }
-                        PDDocument.load(input)
+                val loaded = withContext(Dispatchers.IO) {
+                    val bytes = context.contentResolver.openInputStream(uri).use { input ->
+                        requireNotNull(input) { "Cannot open the selected file" }.readBytes()
                     }
+                    val file = File(context.cacheDir, "working.pdf")
+                    file.writeBytes(bytes)
+                    PDDocument.load(bytes) to file
                 }
                 document?.close()
-                document = doc
+                closeRenderer()
+                document = loaded.first
+                cacheFile = loaded.second
+                openRenderer(loaded.second)
                 renderPage(0)
                 state = state.copy(
                     loading = false,
                     hasDocument = true,
-                    pageCount = doc.numberOfPages,
+                    pageCount = loaded.first.numberOfPages,
                     pageIndex = 0,
                     fileName = displayName(context, uri),
                     documentToken = state.documentToken + 1,
                 )
             } catch (t: Throwable) {
+                Log.e(TAG, "open failed", t)
                 state = state.copy(loading = false, error = t.message ?: "Failed to open PDF")
             }
         }
@@ -94,6 +113,7 @@ class PdfDocumentViewModel : ViewModel() {
                     node.startIndex, node.endIndex,
                 )
             }
+            resyncCacheAndReopen()
             renderPage(state.pageIndex)
             state = state.copy(loading = false, dirty = true)
         }
@@ -116,26 +136,86 @@ class PdfDocumentViewModel : ViewModel() {
 
     private suspend fun renderPage(index: Int) {
         val doc = document ?: return
-        val result = withContext(Dispatchers.IO) {
-            val page = doc.getPage(index)
-            val bmp = PDFRenderer(doc).renderImageWithDPI(index, RENDER_DPI)
-            val parsedPage = ContentStreamEngine.parse(page)
-            val crop = page.cropBox
-            val transform = PageTransform(
-                crop.lowerLeftX, crop.lowerLeftY, crop.width, crop.height,
-                page.rotation, RENDER_DPI / 72f,
+        try {
+            val result = withContext(Dispatchers.IO) {
+                val page = doc.getPage(index)
+                val crop = page.cropBox
+                val scale = RENDER_DPI / 72f
+                val rot = ((page.rotation % 360) + 360) % 360
+                val baseW = Math.round(crop.width * scale)
+                val baseH = Math.round(crop.height * scale)
+                val pxW = if (rot == 90 || rot == 270) baseH else baseW
+                val pxH = if (rot == 90 || rot == 270) baseW else baseH
+                val bmp = renderPageBitmap(index, pxW, pxH)
+                val parsedPage = ContentStreamEngine.parse(page)
+                val transform = PageTransform(
+                    crop.lowerLeftX, crop.lowerLeftY, crop.width, crop.height,
+                    page.rotation, scale,
+                )
+                Triple(bmp, parsedPage, transform)
+            }
+            parsed = result.second
+            state = state.copy(
+                bitmap = result.first.asImageBitmap(),
+                elementCount = result.second.leaves.size,
+                page = result.second,
+                pageTransform = result.third,
+                selectedId = null,
+                expanded = collectGroupIds(result.second.root),
             )
-            Triple(bmp, parsedPage, transform)
+        } catch (t: Throwable) {
+            Log.e(TAG, "render failed page=$index", t)
+            state = state.copy(error = t.message ?: "Failed to render page")
         }
-        parsed = result.second
-        state = state.copy(
-            bitmap = result.first.asImageBitmap(),
-            elementCount = result.second.leaves.size,
-            page = result.second,
-            pageTransform = result.third,
-            selectedId = null,
-            expanded = collectGroupIds(result.second.root),
-        )
+    }
+
+    private suspend fun renderPageBitmap(index: Int, pxW: Int, pxH: Int): Bitmap =
+        try {
+            renderWithPdfium(index, pxW, pxH)
+        } catch (t: Throwable) {
+            Log.e(TAG, "pdfium render failed page=$index, falling back to pdfbox", t)
+            PDFRenderer(requireNotNull(document)).renderImageWithDPI(index, RENDER_DPI)
+        }
+
+    // pdfium leaves empty pixels transparent and PDFs assume white paper, so
+    // prefill white. It is single-page and not thread-safe, hence the mutex.
+    private suspend fun renderWithPdfium(index: Int, pxW: Int, pxH: Int): Bitmap =
+        renderMutex.withLock {
+            val renderer = requireNotNull(pdfRenderer) { "renderer not open" }
+            val bmp = Bitmap.createBitmap(pxW, pxH, Bitmap.Config.ARGB_8888)
+            bmp.eraseColor(Color.WHITE)
+            val page = renderer.openPage(index)
+            try {
+                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            } finally {
+                page.close()
+            }
+            bmp
+        }
+
+    private fun openRenderer(file: File) {
+        val fd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        pfd = fd
+        pdfRenderer = PdfRenderer(fd)
+    }
+
+    private fun closeRenderer() {
+        runCatching { pdfRenderer?.close() }
+        runCatching { pfd?.close() }
+        pdfRenderer = null
+        pfd = null
+    }
+
+    // After an in-memory edit the cache file is stale; rewrite it from the doc
+    // and reopen pdfium on the fresh bytes.
+    private suspend fun resyncCacheAndReopen() {
+        val doc = document ?: return
+        val file = cacheFile ?: return
+        renderMutex.withLock {
+            closeRenderer()
+            withContext(Dispatchers.IO) { file.outputStream().use { doc.save(it) } }
+            openRenderer(file)
+        }
     }
 
     private fun displayName(context: Context, uri: Uri): String {
@@ -147,12 +227,16 @@ class PdfDocumentViewModel : ViewModel() {
     }
 
     override fun onCleared() {
+        closeRenderer()
         document?.close()
         document = null
+        runCatching { cacheFile?.delete() }
+        cacheFile = null
     }
 
     companion object {
         const val RENDER_DPI = 144f
+        private const val TAG = "PdfInspector"
     }
 }
 
