@@ -6,8 +6,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,8 +13,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -31,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import SVS.pdfinspector.ui.PdfCanvas
 import SVS.pdfinspector.ui.theme.InspectorTheme
 
 class MainActivity : ComponentActivity() {
@@ -96,15 +93,17 @@ private fun EmptyState(onOpen: () -> Unit) {
 @Composable
 private fun PageViewer(state: PdfUiState, onPage: (Int) -> Unit) {
     Column(Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .horizontalScroll(rememberScrollState()),
-        ) {
-            state.bitmap?.let { bmp ->
-                Image(bitmap = bmp, contentDescription = "PDF page ${state.pageIndex + 1}")
+        val bmp = state.bitmap
+        if (bmp != null) {
+            PdfCanvas(
+                bitmap = bmp,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            )
+        } else {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
             }
         }
         PageBar(state, onPage)
