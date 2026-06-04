@@ -1,5 +1,6 @@
 package SVS.pdfinspector.ui
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -77,73 +79,74 @@ fun InspectorToolbar(
                 .height(60.dp)
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
+            Text(
+                text = fileName,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 6.dp, end = 8.dp),
+            )
+
             Row(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Text(
-                    text = fileName,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .weight(1f, fill = false)
-                        .padding(start = 6.dp, end = 8.dp),
-                )
                 if (copyText != null) {
                     IconButton(onClick = onCopyText) {
                         Icon(TablerIcons.Copy, "Copy text", Modifier.size(20.dp))
                     }
                 }
-            }
 
-            FitMenuButton(onFitWidth = onFitWidth, onFitHeight = onFitHeight)
-            IconButton(onClick = onToggleFullscreen) {
-                Icon(
-                    imageVector = if (fullscreen) TablerIcons.Minimize else TablerIcons.Maximize,
-                    contentDescription = "Toggle full screen",
-                    modifier = Modifier.size(20.dp),
-                    tint = if (fullscreen) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+                FitMenuButton(onFitWidth = onFitWidth, onFitHeight = onFitHeight)
+                IconButton(onClick = onToggleFullscreen) {
+                    Icon(
+                        imageVector = if (fullscreen) TablerIcons.Minimize else TablerIcons.Maximize,
+                        contentDescription = "Toggle full screen",
+                        modifier = Modifier.size(20.dp),
+                        tint = if (fullscreen) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
 
-            ToolDivider()
-            IconButton(onClick = onPrev, enabled = pageIndex > 0) {
-                Icon(TablerIcons.ChevronLeft, "Previous page", Modifier.size(20.dp))
-            }
-            Text("${pageIndex + 1} / $pageCount", style = MaterialTheme.typography.labelLarge)
-            IconButton(onClick = onNext, enabled = pageIndex < pageCount - 1) {
-                Icon(TablerIcons.ChevronRight, "Next page", Modifier.size(20.dp))
-            }
+                ToolDivider()
+                IconButton(onClick = onPrev, enabled = pageIndex > 0) {
+                    Icon(TablerIcons.ChevronLeft, "Previous page", Modifier.size(20.dp))
+                }
+                Text("${pageIndex + 1} / $pageCount", style = MaterialTheme.typography.labelLarge)
+                IconButton(onClick = onNext, enabled = pageIndex < pageCount - 1) {
+                    Icon(TablerIcons.ChevronRight, "Next page", Modifier.size(20.dp))
+                }
 
-            ToolDivider()
-            IconButton(onClick = onUndo, enabled = canUndo) {
-                Icon(TablerIcons.ArrowBackUp, "Undo", Modifier.size(20.dp))
-            }
-            IconButton(onClick = onRedo, enabled = canRedo) {
-                Icon(TablerIcons.ArrowForwardUp, "Redo", Modifier.size(20.dp))
-            }
+                ToolDivider()
+                IconButton(onClick = onUndo, enabled = canUndo) {
+                    Icon(TablerIcons.ArrowBackUp, "Undo", Modifier.size(20.dp))
+                }
+                IconButton(onClick = onRedo, enabled = canRedo) {
+                    Icon(TablerIcons.ArrowForwardUp, "Redo", Modifier.size(20.dp))
+                }
 
-            ToolDivider()
-            IconButton(onClick = onOpen) {
-                Icon(TablerIcons.Folder, "Open a PDF", Modifier.size(20.dp))
-            }
-            IconButton(
-                onClick = onSave,
-                enabled = dirty,
-                colors = IconButtonDefaults.iconButtonColors(
-                    contentColor = MaterialTheme.colorScheme.primary,
-                ),
-            ) {
-                Icon(TablerIcons.DeviceFloppy, "Save a copy", Modifier.size(20.dp))
-            }
-            IconButton(onClick = onSettings) {
-                Icon(TablerIcons.Settings, "Settings", Modifier.size(20.dp))
+                ToolDivider()
+                IconButton(onClick = onOpen) {
+                    Icon(TablerIcons.Folder, "Open a PDF", Modifier.size(20.dp))
+                }
+                IconButton(
+                    onClick = onSave,
+                    enabled = dirty,
+                    colors = IconButtonDefaults.iconButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary,
+                    ),
+                ) {
+                    Icon(TablerIcons.DeviceFloppy, "Save a copy", Modifier.size(20.dp))
+                }
+                IconButton(onClick = onSettings) {
+                    Icon(TablerIcons.Settings, "Settings", Modifier.size(20.dp))
+                }
             }
         }
     }
