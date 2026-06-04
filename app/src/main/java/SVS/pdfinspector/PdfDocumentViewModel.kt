@@ -13,6 +13,8 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.rendering.PDFRenderer
 import SVS.pdfinspector.engine.ContentStreamEngine
 import SVS.pdfinspector.engine.ParsedPage
+import SVS.pdfinspector.engine.collectGroupIds
+import SVS.pdfinspector.ui.PageTransform
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -61,17 +63,40 @@ class PdfDocumentViewModel : ViewModel() {
         }
     }
 
+    fun select(id: Int?) {
+        state = state.copy(selectedId = id)
+    }
+
+    fun toggleExpand(id: Int) {
+        val e = state.expanded
+        state = state.copy(expanded = if (id in e) e - id else e + id)
+    }
+
+    fun toggleRaw() {
+        state = state.copy(showRaw = !state.showRaw)
+    }
+
     private suspend fun renderPage(index: Int) {
         val doc = document ?: return
         val result = withContext(Dispatchers.IO) {
+            val page = doc.getPage(index)
             val bmp = PDFRenderer(doc).renderImageWithDPI(index, RENDER_DPI)
-            val parsedPage = ContentStreamEngine.parse(doc.getPage(index))
-            bmp to parsedPage
+            val parsedPage = ContentStreamEngine.parse(page)
+            val crop = page.cropBox
+            val transform = PageTransform(
+                crop.lowerLeftX, crop.lowerLeftY, crop.width, crop.height,
+                page.rotation, RENDER_DPI / 72f,
+            )
+            Triple(bmp, parsedPage, transform)
         }
         parsed = result.second
         state = state.copy(
             bitmap = result.first.asImageBitmap(),
             elementCount = result.second.leaves.size,
+            page = result.second,
+            pageTransform = result.third,
+            selectedId = null,
+            expanded = collectGroupIds(result.second.root),
         )
     }
 
@@ -92,5 +117,10 @@ data class PdfUiState(
     val pageIndex: Int = 0,
     val pageCount: Int = 0,
     val elementCount: Int = 0,
+    val page: ParsedPage? = null,
+    val pageTransform: PageTransform? = null,
+    val selectedId: Int? = null,
+    val expanded: Set<Int> = emptySet(),
+    val showRaw: Boolean = false,
     val error: String? = null,
 )

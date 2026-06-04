@@ -1,6 +1,7 @@
 package SVS.pdfinspector.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,16 +14,27 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 
+data class LeafRect(val id: Int, val rect: Rect)
+
 private const val MIN_SCALE = 0.1f
 private const val MAX_SCALE = 12f
+private val Highlight = Color(0xFF0B6E4F)
 
 @Composable
-fun PdfCanvas(bitmap: ImageBitmap, modifier: Modifier = Modifier) {
+fun PdfCanvas(
+    bitmap: ImageBitmap,
+    leaves: List<LeafRect>,
+    selectedRect: Rect?,
+    onSelect: (Int?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     BoxWithConstraints(modifier) {
         val viewportW = constraints.maxWidth.toFloat()
         val viewportH = constraints.maxHeight.toFloat()
@@ -47,6 +59,13 @@ fun PdfCanvas(bitmap: ImageBitmap, modifier: Modifier = Modifier) {
                         offset = centroid - (centroid - offset) * (newScale / scale) + pan
                         scale = newScale
                     }
+                }
+                .pointerInput(bitmap, leaves) {
+                    detectTapGestures { tap ->
+                        val point = Offset((tap.x - offset.x) / scale, (tap.y - offset.y) / scale)
+                        val hit = leaves.lastOrNull { it.rect.contains(point) }
+                        onSelect(hit?.id)
+                    }
                 },
         ) {
             drawRect(color = Color(0xFFE9ECEB), size = size)
@@ -55,6 +74,19 @@ fun PdfCanvas(bitmap: ImageBitmap, modifier: Modifier = Modifier) {
                 scale(scale, scale, pivot = Offset.Zero)
             }) {
                 drawImage(image = bitmap, topLeft = Offset.Zero)
+                selectedRect?.let { r ->
+                    drawRect(
+                        color = Highlight.copy(alpha = 0.18f),
+                        topLeft = r.topLeft,
+                        size = r.size,
+                    )
+                    drawRect(
+                        color = Highlight,
+                        topLeft = r.topLeft,
+                        size = r.size,
+                        style = Stroke(width = 2f / scale),
+                    )
+                }
             }
         }
     }

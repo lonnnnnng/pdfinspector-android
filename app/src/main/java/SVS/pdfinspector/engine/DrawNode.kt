@@ -22,3 +22,16 @@ class ParsedPage(
     val root: DrawNode,
     val leaves: List<DrawNode>,
 )
+
+fun findNode(node: DrawNode, id: Int?): DrawNode? {
+    if (id == null) return null
+    if (node.id == id) return node
+    for (c in node.children) findNode(c, id)?.let { return it }
+    return null
+}
+
+fun collectGroupIds(node: DrawNode, into: MutableSet<Int> = HashSet()): Set<Int> {
+    if (node.kind == NodeKind.GROUP) into.add(node.id)
+    for (c in node.children) collectGroupIds(c, into)
+    return into
+}
