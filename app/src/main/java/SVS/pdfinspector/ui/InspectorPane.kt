@@ -54,6 +54,7 @@ fun InspectorPane(
     page: ParsedPage,
     expanded: Set<Int>,
     selectedId: Int?,
+    revealTick: Int,
     showRaw: Boolean,
     canDelete: Boolean,
     dock: Dock,
@@ -118,7 +119,7 @@ fun InspectorPane(
 
         val rows = remember(page, expanded) { flatten(page.root, expanded) }
         val listState = rememberLazyListState()
-        LaunchedEffect(selectedId, rows) {
+        LaunchedEffect(revealTick) {
             if (selectedId != null) {
                 val index = rows.indexOfFirst { it.node.id == selectedId }
                 if (index >= 0) listState.animateScrollToItem(index)

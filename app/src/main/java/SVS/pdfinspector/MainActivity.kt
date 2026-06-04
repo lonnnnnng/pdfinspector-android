@@ -274,7 +274,7 @@ private fun Workspace(
                 backdropColor = backdrop,
                 fitMode = fitMode,
                 onUserTransform = onUserTransform,
-                onSelect = { id -> viewModel.select(id) },
+                onSelect = { id -> viewModel.select(id, reveal = true) },
                 modifier = mod,
             )
         } else {
@@ -286,6 +286,7 @@ private fun Workspace(
             page = page,
             expanded = state.expanded,
             selectedId = state.selectedId,
+            revealTick = state.revealTick,
             showRaw = state.showRaw,
             canDelete = state.selectedId != null,
             dock = dock,

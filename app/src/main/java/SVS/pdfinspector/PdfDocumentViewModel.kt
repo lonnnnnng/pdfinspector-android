@@ -97,8 +97,11 @@ class PdfDocumentViewModel : ViewModel() {
         }
     }
 
-    fun select(id: Int?) {
-        state = state.copy(selectedId = id)
+    fun select(id: Int?, reveal: Boolean = false) {
+        state = state.copy(
+            selectedId = id,
+            revealTick = if (reveal) state.revealTick + 1 else state.revealTick,
+        )
     }
 
     fun copySelectedText(context: Context) {
@@ -335,6 +338,7 @@ data class PdfUiState(
     val page: ParsedPage? = null,
     val pageTransform: PageTransform? = null,
     val selectedId: Int? = null,
+    val revealTick: Int = 0,
     val expanded: Set<Int> = emptySet(),
     val showRaw: Boolean = false,
     val dirty: Boolean = false,
