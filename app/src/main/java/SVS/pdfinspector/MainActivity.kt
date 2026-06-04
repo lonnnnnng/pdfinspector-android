@@ -155,6 +155,9 @@ private fun PageViewer(viewModel: PdfDocumentViewModel) {
                 bitmap = bmp,
                 leaves = leafRects,
                 selectedRect = selectedRect,
+                highlightColor = MaterialTheme.colorScheme.primary,
+                backdropColor = MaterialTheme.colorScheme.surfaceVariant,
+                selectable = true,
                 onSelect = { id -> viewModel.select(id) },
                 modifier = Modifier
                     .weight(1f)

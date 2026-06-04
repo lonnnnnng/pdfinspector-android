@@ -25,13 +25,15 @@ data class LeafRect(val id: Int, val rect: Rect)
 
 private const val MIN_SCALE = 0.1f
 private const val MAX_SCALE = 12f
-private val Highlight = Color(0xFF0B6E4F)
 
 @Composable
 fun PdfCanvas(
     bitmap: ImageBitmap,
     leaves: List<LeafRect>,
     selectedRect: Rect?,
+    highlightColor: Color,
+    backdropColor: Color,
+    selectable: Boolean,
     onSelect: (Int?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -60,28 +62,25 @@ fun PdfCanvas(
                         scale = newScale
                     }
                 }
-                .pointerInput(bitmap, leaves) {
+                .pointerInput(bitmap, leaves, selectable) {
                     detectTapGestures { tap ->
+                        if (!selectable) return@detectTapGestures
                         val point = Offset((tap.x - offset.x) / scale, (tap.y - offset.y) / scale)
                         val hit = leaves.lastOrNull { it.rect.contains(point) }
                         onSelect(hit?.id)
                     }
                 },
         ) {
-            drawRect(color = Color(0xFFE9ECEB), size = size)
+            drawRect(color = backdropColor, size = size)
             withTransform({
                 translate(offset.x, offset.y)
                 scale(scale, scale, pivot = Offset.Zero)
             }) {
                 drawImage(image = bitmap, topLeft = Offset.Zero)
                 selectedRect?.let { r ->
+                    drawRect(color = highlightColor.copy(alpha = 0.18f), topLeft = r.topLeft, size = r.size)
                     drawRect(
-                        color = Highlight.copy(alpha = 0.18f),
-                        topLeft = r.topLeft,
-                        size = r.size,
-                    )
-                    drawRect(
-                        color = Highlight,
+                        color = highlightColor,
                         topLeft = r.topLeft,
                         size = r.size,
                         style = Stroke(width = 2f / scale),
