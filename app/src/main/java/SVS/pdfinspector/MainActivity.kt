@@ -8,44 +8,50 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import SVS.pdfinspector.engine.findNode
+import SVS.pdfinspector.ui.Dock
+import SVS.pdfinspector.ui.InspectorDock
 import SVS.pdfinspector.ui.InspectorPane
+import SVS.pdfinspector.ui.InspectorToolbar
 import SVS.pdfinspector.ui.LeafRect
 import SVS.pdfinspector.ui.PdfCanvas
+import SVS.pdfinspector.ui.Tool
 import SVS.pdfinspector.ui.theme.InspectorTheme
 
 class MainActivity : ComponentActivity() {
@@ -61,7 +67,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InspectorScreen(
     initialUri: Uri? = null,
@@ -77,37 +82,63 @@ fun InspectorScreen(
     val openLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri -> uri?.let { viewModel.open(context, it) } }
-
     val saveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/pdf"),
     ) { uri -> uri?.let { viewModel.saveCopy(context, it) } }
 
     fun pickPdf() = openLauncher.launch(arrayOf("application/pdf"))
 
+    val configuration = LocalConfiguration.current
+    val landscape = configuration.screenWidthDp > configuration.screenHeightDp
+    var dock by remember(landscape) { mutableStateOf(if (landscape) Dock.SIDE else Dock.BOTTOM) }
+    var transparent by rememberSaveable { mutableStateOf(false) }
+    var bottomHeight by remember { mutableStateOf(300.dp) }
+    var sideWidth by remember { mutableStateOf(340.dp) }
+    val density = LocalDensity.current
+    val sizeDp = if (dock == Dock.BOTTOM) bottomHeight else sideWidth
+    val onResize: (Float) -> Unit = { delta ->
+        if (dock == Dock.BOTTOM) {
+            bottomHeight = with(density) { (bottomHeight.toPx() - delta).toDp() }.coerceIn(140.dp, 600.dp)
+        } else {
+            sideWidth = with(density) { (sideWidth.toPx() - delta).toDp() }.coerceIn(240.dp, 600.dp)
+        }
+    }
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("PDF Inspector") },
-                actions = {
-                    TextButton(
-                        onClick = { saveLauncher.launch("inspected.pdf") },
-                        enabled = state.dirty,
-                    ) { Text("Save") }
-                    TextButton(onClick = ::pickPdf) { Text("Open") }
-                },
+            InspectorToolbar(
+                tool = state.tool,
+                hasDocument = state.hasDocument,
+                pageIndex = state.pageIndex,
+                pageCount = state.pageCount,
+                dirty = state.dirty,
+                onTool = { viewModel.setTool(it) },
+                onPrev = { viewModel.showPage(state.pageIndex - 1) },
+                onNext = { viewModel.showPage(state.pageIndex + 1) },
+                onOpen = { pickPdf() },
+                onSave = { saveLauncher.launch("inspected.pdf") },
             )
         },
-    ) { padding ->
+    ) { inner ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .padding(inner),
             contentAlignment = Alignment.Center,
         ) {
             when {
                 state.loading && state.bitmap == null -> CircularProgressIndicator()
                 state.error != null -> Text("Error: ${state.error}")
-                state.hasDocument -> PageViewer(viewModel)
+                state.hasDocument -> Workspace(
+                    viewModel = viewModel,
+                    state = state,
+                    dock = dock,
+                    transparent = transparent,
+                    sizeDp = sizeDp,
+                    onResize = onResize,
+                    onToggleDock = { dock = if (dock == Dock.BOTTOM) Dock.SIDE else Dock.BOTTOM },
+                    onToggleTransparent = { transparent = !transparent },
+                )
                 else -> EmptyState(onOpen = ::pickPdf)
             }
         }
@@ -115,127 +146,131 @@ fun InspectorScreen(
 }
 
 @Composable
-private fun EmptyState(onOpen: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("No PDF open", style = MaterialTheme.typography.titleMedium)
-        Text(
-            "Open a document to inspect its contents.",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Button(onClick = onOpen, modifier = Modifier.padding(top = 16.dp)) { Text("Open a PDF") }
-    }
-}
-
-@Composable
-private fun PageViewer(viewModel: PdfDocumentViewModel) {
-    val state = viewModel.state
-    val page = state.page
+private fun Workspace(
+    viewModel: PdfDocumentViewModel,
+    state: PdfUiState,
+    dock: Dock,
+    transparent: Boolean,
+    sizeDp: androidx.compose.ui.unit.Dp,
+    onResize: (Float) -> Unit,
+    onToggleDock: () -> Unit,
+    onToggleTransparent: () -> Unit,
+) {
+    val page = state.page ?: return
     val transform = state.pageTransform
 
     val leafRects = remember(page, transform) {
-        if (page != null && transform != null) {
+        if (transform != null) {
             page.leaves.mapNotNull { n -> n.bounds?.let { LeafRect(n.id, transform.toRect(it)) } }
         } else {
             emptyList()
         }
     }
     val selectedRect = remember(page, transform, state.selectedId) {
-        val node = page?.let { findNode(it.root, state.selectedId) }
+        val node = findNode(page.root, state.selectedId)
         val bounds = node?.bounds
         if (bounds != null && transform != null) transform.toRect(bounds) else null
     }
 
-    val density = LocalDensity.current
-    var inspectorHeight by remember { mutableStateOf(300.dp) }
+    val highlight = MaterialTheme.colorScheme.primary
+    val backdrop = MaterialTheme.colorScheme.surfaceVariant
+    val bmp = state.bitmap
 
-    Column(Modifier.fillMaxSize()) {
-        val bmp = state.bitmap
+    val canvas: @Composable (Modifier) -> Unit = { mod ->
         if (bmp != null) {
             PdfCanvas(
                 bitmap = bmp,
                 leaves = leafRects,
                 selectedRect = selectedRect,
-                highlightColor = MaterialTheme.colorScheme.primary,
-                backdropColor = MaterialTheme.colorScheme.surfaceVariant,
-                selectable = true,
+                highlightColor = highlight,
+                backdropColor = backdrop,
+                selectable = state.tool == Tool.SELECT,
                 onSelect = { id -> viewModel.select(id) },
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
+                modifier = mod,
             )
         } else {
-            Box(
+            Box(mod, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        }
+    }
+    val pane: @Composable () -> Unit = {
+        InspectorPane(
+            page = page,
+            expanded = state.expanded,
+            selectedId = state.selectedId,
+            showRaw = state.showRaw,
+            canDelete = state.selectedId != null,
+            dock = dock,
+            transparent = transparent,
+            onSelect = { id -> viewModel.select(id) },
+            onToggleExpand = { id -> viewModel.toggleExpand(id) },
+            onToggleRaw = { viewModel.toggleRaw() },
+            onToggleDock = onToggleDock,
+            onToggleTransparent = onToggleTransparent,
+            onDelete = { viewModel.deleteSelected() },
+        )
+    }
+
+    if (transparent) {
+        Box(Modifier.fillMaxSize()) {
+            canvas(Modifier.fillMaxSize())
+            InspectorDock(
+                dock = dock,
+                transparent = true,
+                sizeDp = sizeDp,
+                onResizePx = onResize,
+                modifier = Modifier
+                    .align(if (dock == Dock.SIDE) Alignment.CenterEnd else Alignment.BottomCenter)
+                    .then(if (dock == Dock.SIDE) Modifier.fillMaxHeight() else Modifier.fillMaxWidth()),
+            ) { pane() }
+        }
+    } else if (dock == Dock.SIDE) {
+        Row(Modifier.fillMaxSize()) {
+            canvas(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+            )
+            InspectorDock(dock, false, sizeDp, onResize, Modifier.fillMaxHeight()) { pane() }
+        }
+    } else {
+        Column(Modifier.fillMaxSize()) {
+            canvas(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                contentAlignment = Alignment.Center,
-            ) { CircularProgressIndicator() }
-        }
-
-        if (page != null) {
-            DragHandle(onDrag = { dyPx ->
-                inspectorHeight = with(density) { (inspectorHeight.toPx() - dyPx).toDp() }
-                    .coerceIn(140.dp, 520.dp)
-            })
-            InspectorPane(
-                page = page,
-                expanded = state.expanded,
-                selectedId = state.selectedId,
-                showRaw = state.showRaw,
-                canDelete = state.selectedId != null,
-                onSelect = { id -> viewModel.select(id) },
-                onToggleExpand = { id -> viewModel.toggleExpand(id) },
-                onToggleRaw = { viewModel.toggleRaw() },
-                onDelete = { viewModel.deleteSelected() },
-                modifier = Modifier.height(inspectorHeight),
             )
+            InspectorDock(dock, false, sizeDp, onResize, Modifier.fillMaxWidth()) { pane() }
         }
-        PageBar(state, onPage = { index -> viewModel.showPage(index) })
     }
 }
 
 @Composable
-private fun DragHandle(onDrag: (Float) -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(22.dp)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .pointerInput(Unit) {
-                detectVerticalDragGestures { change, dragAmount ->
-                    change.consume()
-                    onDrag(dragAmount)
-                }
-            },
-        contentAlignment = Alignment.Center,
+private fun EmptyState(onOpen: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(24.dp),
     ) {
-        Box(
-            Modifier
-                .width(36.dp)
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(MaterialTheme.colorScheme.onSurfaceVariant),
+        Icon(
+            imageVector = Icons.Filled.PictureAsPdf,
+            contentDescription = null,
+            modifier = Modifier.size(72.dp),
+            tint = MaterialTheme.colorScheme.primary,
         )
-    }
-}
-
-@Composable
-private fun PageBar(state: PdfUiState, onPage: (Int) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TextButton(
-            onClick = { onPage(state.pageIndex - 1) },
-            enabled = state.pageIndex > 0,
-        ) { Text("Prev") }
-        Text("Page ${state.pageIndex + 1}/${state.pageCount}  ·  ${state.elementCount} elements")
-        TextButton(
-            onClick = { onPage(state.pageIndex + 1) },
-            enabled = state.pageIndex < state.pageCount - 1,
-        ) { Text("Next") }
+        Spacer(Modifier.height(16.dp))
+        Text("Inspect any PDF", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = "Open a document to explore its elements, select them on the page or in the tree, and delete what you don't need.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.widthIn(max = 360.dp),
+        )
+        Spacer(Modifier.height(20.dp))
+        FilledTonalButton(onClick = onOpen) {
+            Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Open a PDF")
+        }
     }
 }

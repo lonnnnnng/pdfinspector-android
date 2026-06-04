@@ -18,6 +18,7 @@ import SVS.pdfinspector.engine.ParsedPage
 import SVS.pdfinspector.engine.collectGroupIds
 import SVS.pdfinspector.engine.findNode
 import SVS.pdfinspector.ui.PageTransform
+import SVS.pdfinspector.ui.Tool
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -64,6 +65,10 @@ class PdfDocumentViewModel : ViewModel() {
             renderPage(index)
             state = state.copy(loading = false, pageIndex = index)
         }
+    }
+
+    fun setTool(tool: Tool) {
+        state = state.copy(tool = tool)
     }
 
     fun select(id: Int?) {
@@ -158,5 +163,6 @@ data class PdfUiState(
     val expanded: Set<Int> = emptySet(),
     val showRaw: Boolean = false,
     val dirty: Boolean = false,
+    val tool: Tool = Tool.SELECT,
     val error: String? = null,
 )

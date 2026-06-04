@@ -2,7 +2,6 @@ package SVS.pdfinspector.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,9 +14,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.HorizontalSplit
+import androidx.compose.material.icons.filled.Opacity
+import androidx.compose.material.icons.filled.VerticalSplit
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,9 +56,13 @@ fun InspectorPane(
     selectedId: Int?,
     showRaw: Boolean,
     canDelete: Boolean,
+    dock: Dock,
+    transparent: Boolean,
     onSelect: (Int) -> Unit,
     onToggleExpand: (Int) -> Unit,
     onToggleRaw: () -> Unit,
+    onToggleDock: () -> Unit,
+    onToggleTransparent: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -58,18 +70,39 @@ fun InspectorPane(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .padding(start = 16.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Inspector", style = MaterialTheme.typography.titleSmall)
-            Spacer(Modifier.width(12.dp))
-            FilterChip(
-                selected = showRaw,
-                onClick = onToggleRaw,
-                label = { Text(if (showRaw) "Raw" else "Friendly") },
-            )
-            Spacer(Modifier.weight(1f))
-            Button(onClick = onDelete, enabled = canDelete) { Text("Delete") }
+            Column(Modifier.weight(1f)) {
+                Text("Inspector", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "${page.leaves.size} elements",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconToggleButton(checked = showRaw, onCheckedChange = { onToggleRaw() }) {
+                Icon(Icons.Filled.Code, contentDescription = "Toggle raw operators")
+            }
+            IconButton(onClick = onToggleDock) {
+                Icon(
+                    imageVector = if (dock == Dock.BOTTOM) Icons.Filled.VerticalSplit else Icons.Filled.HorizontalSplit,
+                    contentDescription = "Dock side or bottom",
+                )
+            }
+            IconToggleButton(checked = transparent, onCheckedChange = { onToggleTransparent() }) {
+                Icon(Icons.Filled.Opacity, contentDescription = "Toggle transparency")
+            }
+            FilledTonalIconButton(
+                onClick = onDelete,
+                enabled = canDelete,
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                ),
+            ) {
+                Icon(Icons.Filled.Delete, contentDescription = "Delete element")
+            }
         }
         HorizontalDivider()
 
@@ -83,13 +116,7 @@ fun InspectorPane(
         }
         LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
             items(rows, key = { it.node.id }) { row ->
-                TreeRowItem(
-                    row = row,
-                    selected = row.node.id == selectedId,
-                    showRaw = showRaw,
-                    onSelect = onSelect,
-                    onToggleExpand = onToggleExpand,
-                )
+                TreeRowItem(row, row.node.id == selectedId, showRaw, onSelect, onToggleExpand)
             }
         }
     }
@@ -125,14 +152,17 @@ private fun TreeRowItem(
             .fillMaxWidth()
             .background(background)
             .clickable { onSelect(node.id) }
-            .padding(start = (8 + row.depth * 16).dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = (8 + row.depth * 16).dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
             if (row.hasChildren) {
                 Text(
                     text = if (row.expanded) "▾" else "▸",
-                    modifier = Modifier.clickable { onToggleExpand(node.id) },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clickable { onToggleExpand(node.id) },
                 )
             }
         }
@@ -142,6 +172,7 @@ private fun TreeRowItem(
             Text(
                 text = node.label,
                 style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -171,19 +202,20 @@ private fun TreeRowItem(
 
 @Composable
 private fun KindBadge(kind: NodeKind) {
-    val (text, color) = when (kind) {
-        NodeKind.GROUP -> "{}" to Color(0xFF6B7280)
-        NodeKind.TEXT -> "T" to Color(0xFF2563EB)
-        NodeKind.PATH -> "◑" to Color(0xFF9333EA)
-        NodeKind.IMAGE -> "▣" to Color(0xFF0B6E4F)
+    val scheme = MaterialTheme.colorScheme
+    val (label, color) = when (kind) {
+        NodeKind.GROUP -> "{ }" to scheme.outline
+        NodeKind.TEXT -> "T" to scheme.primary
+        NodeKind.PATH -> "◑" to scheme.tertiary
+        NodeKind.IMAGE -> "▣" to scheme.secondary
     }
     Box(
         modifier = Modifier
-            .size(22.dp)
-            .clip(RoundedCornerShape(5.dp))
-            .background(color.copy(alpha = 0.15f)),
+            .size(24.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(color.copy(alpha = 0.16f)),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, style = MaterialTheme.typography.labelMedium, color = color)
+        Text(label, style = MaterialTheme.typography.labelMedium, color = color)
     }
 }
