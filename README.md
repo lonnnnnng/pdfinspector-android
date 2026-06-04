@@ -10,11 +10,15 @@ and save a copy. Built with Kotlin + Jetpack Compose on top of PdfBox-Android.
 - **View** — render with pinch-zoom and pan
 - **Inspect** — content stream parsed into a draw-event tree (`q/Q` groups,
   `BT…ET` text, paths, images) with exact token ranges
-- **Select** — tap on the canvas or tap a tree row; selection is two-way bound
-  and drawn as a translucent, bordered highlight
+- **Select** — Pan / Select tools; in Select mode tap the canvas or a tree row,
+  two-way bound and drawn as a translucent, bordered highlight
 - **Friendly / Raw** — toggle between decoded labels and the raw operators
 - **Delete** — removes the element's exact tokens and rewrites the stream
 - **Save** — writes a new copy; the original file is never touched
+- **UI** — Material 3 with dynamic color; a scrollable floating toolbar (tools,
+  page nav, Open, Save); inspector docks sideways in landscape / bottom in
+  portrait, with on-panel toggles for dock side and transparency, and a
+  draggable resize handle
 
 ## Architecture
 
@@ -26,8 +30,9 @@ One engine powers viewing, the tree, canvas selection, and editing.
     ranges
   - `ElementEditor` — drops a token range and rewrites via `ContentStreamWriter`
   - `Geometry` (`Affine`, `Bounds`), `DrawNode`
-- `ui/` — Compose: `PdfCanvas` (gestures + highlight), `InspectorPane` (tree),
-  `PageTransform` (PDF user space → bitmap pixels)
+- `ui/` — Compose: `InspectorToolbar`, `PdfCanvas` (gestures + highlight),
+  `InspectorPane` (tree) + `InspectorDock` (side/bottom, transparency, resize),
+  `PageTransform` (PDF user space → bitmap pixels), `Tools`
 - `PdfDocumentViewModel` — load / render / parse / select / delete / save state
 
 ## Build and run
