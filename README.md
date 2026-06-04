@@ -1,64 +1,50 @@
-# PDF Inspector
+<p align="center">
+  <img src="fastlane/metadata/android/en-US/images/icon.png" width="80" alt="PDF Inspector icon" />
+</p>
 
-A DevTools-style inspector and surgical editor for PDFs on Android. Open a
-document, see its content stream as a navigable tree, select any element — a
-text block, a vector path, an image — from the canvas or the tree, delete it,
-and save a copy. Built with Kotlin + Jetpack Compose on top of PdfBox-Android.
+<h1 align="center">PDF Inspector</h1>
 
-## Status — core loop complete
+<p align="center">
+  A DevTools-style element inspector and editor for PDFs on Android
+</p>
 
-- **View** — render with pinch-zoom and pan
-- **Inspect** — content stream parsed into a draw-event tree (`q/Q` groups,
-  `BT…ET` text, paths, images) with exact token ranges
-- **Select** — Pan / Select tools; in Select mode tap the canvas or a tree row,
-  two-way bound and drawn as a translucent, bordered highlight
-- **Friendly / Raw** — toggle between decoded labels and the raw operators
-- **Delete** — removes the element's exact tokens and rewrites the stream
-- **Save** — writes a new copy; the original file is never touched
-- **UI** — Material 3 with dynamic color; a scrollable floating toolbar (tools,
-  page nav, Open, Save); inspector docks sideways in landscape / bottom in
-  portrait, with on-panel toggles for dock side and transparency, and a
-  draggable resize handle
+<p align="center">
+  <a href="https://github.com/shardulvs/pdfinspector-android/releases/latest"><img src="https://img.shields.io/github/v/release/shardulvs/pdfinspector-android?style=flat-square&label=release&color=blue" alt="Release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-orange?style=flat-square" alt="License" /></a>
+  <img src="https://img.shields.io/badge/Android-8.0%2B-3ddc84?style=flat-square&logo=android&logoColor=white" alt="Android 8.0+" />
+</p>
 
-## Architecture
+<p align="center">
+  <a href="https://github.com/shardulvs/pdfinspector-android/releases/latest">GitHub Releases</a>
+</p>
 
-One engine powers viewing, the tree, canvas selection, and editing.
+---
 
-- `engine/` — pure Kotlin, no Android or Compose dependencies
-  - `ContentStreamEngine` — tokenizes the page (`PDFStreamParser`), tracks the
-    transformation matrix, and builds the `DrawNode` tree with bounds + token
-    ranges
-  - `ElementEditor` — drops a token range and rewrites via `ContentStreamWriter`
-  - `Geometry` (`Affine`, `Bounds`), `DrawNode`
-- `ui/` — Compose: `InspectorToolbar`, `PdfCanvas` (gestures + highlight),
-  `InspectorPane` (tree) + `InspectorDock` (side/bottom, transparency, resize),
-  `PageTransform` (PDF user space → bitmap pixels), `Tools`
-- `PdfDocumentViewModel` — load / render / parse / select / delete / save state
+## At a glance
 
-## Build and run
+- **DevTools for PDFs**: every page's content stream is parsed into a navigable tree of text blocks, vector paths and images, grouped the way the PDF actually draws them. Switch between friendly labels and the raw content-stream operators.
+- **Two-way selection**: tap an element on the page or tap its row in the tree, and the other side highlights to match, drawn as a clear bordered outline on the canvas.
+- **Surgical delete**: remove exactly the element you picked by rewriting just its slice of the content stream, leaving the rest of the page untouched. Full undo and redo.
+- **Save a copy, never the original**: your edited PDF is written to a new file through the system file picker, so the source document is left exactly as it was.
+- **Smooth viewing**: pan and pinch-zoom, fit to width or height, a global zoom that carries across pages, and a full-screen mode.
+- **Dockable inspector**: the inspector panel docks to the side in landscape or the bottom in portrait, resizes by dragging, and can be made transparent to see the page through it.
+- **Material You**: Material 3 design with dynamic color on Android 12+, light / dark / system themes and a choice of accent colors.
+- **Private and open**: open source, no accounts, no telemetry. No network access and no storage permission: files are opened and saved through Android's Storage Access Framework, so the app only ever touches the documents you explicitly pick.
 
+## Install
+
+| Channel | |
+|---|---|
+| [GitHub Releases](https://github.com/shardulvs/pdfinspector-android/releases/latest) | Signed APK |
+
+## Build from source
+
+Requires **JDK 17** (the project pins Java 17):
+
+```bash
+git clone https://github.com/shardulvs/pdfinspector-android.git
+cd pdfinspector-android
+JAVA_HOME=/path/to/jdk-17 ./gradlew assembleDebug
 ```
-JAVA_HOME=/opt/android-studio/jbr ./gradlew assembleDebug
-JAVA_HOME=/opt/android-studio/jbr ./gradlew testDebugUnitTest
-```
 
-The system Java 21 here is JRE-only, so point `JAVA_HOME` at a full JDK such as
-Android Studio's bundled JBR. Android Studio handles this automatically.
-
-Toolchain: Kotlin 2.0, AGP 8.12, Gradle 8.13, minSdk 26.
-
-## Known limitations (v1)
-
-- Text bounding boxes are approximate (position exact, width estimated); tree
-  selection and deletion are exact regardless.
-- Deleting a bare image leaves its preceding `cm`; delete the parent Group to
-  remove it cleanly.
-- Rotated-page (90/270) canvas highlights are best-effort; the tree is exact.
-- Type0 / CJK text previews may show placeholders.
-
-## Roadmap
-
-- Drag-to-move (`q/cm/Q` wrap for text and shapes; matrix edit for images)
-- Resize images via the placement matrix
-- Hide toggle (non-destructive) before delete
-- Undo / redo, multi-page thumbnails
+Output: `app/build/outputs/apk/debug/app-debug.apk`
