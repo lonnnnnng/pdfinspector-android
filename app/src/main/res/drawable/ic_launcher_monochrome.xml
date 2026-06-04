@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed (monochrome) icon. The launcher tints this layer; only its alpha shape is used. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="432"
+    android:viewportHeight="432">
+    <path android:pathData="M86 116 H322 L348 142 V176 Q348 188 336 188 H98 Q86 188 86 176 Z" android:strokeColor="#000000" android:strokeWidth="13" android:strokeLineJoin="round" />
+    <path android:pathData="M116 127 V177 M116 127 H138 C161 127 161 152 138 152 H116 M192 127 V177 M192 127 H210 C242 127 242 177 210 177 H192 M272 127 V177 M272 127 H314 M272 151 H305" android:strokeColor="#000000" android:strokeWidth="15" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M130 196 V316 M130 232 H158 M130 274 H158 M130 316 H158" android:strokeColor="#000000" android:strokeWidth="8" android:strokeLineCap="round" />
+    <path android:pathData="M158 215 h34 v34 h-34 Z M158 257 h34 v34 h-34 Z M158 299 h34 v34 h-34 Z" android:fillColor="#000000" />
+    <path android:pathData="M208 218 h112 v28 h-112 Z M208 260 h120 v28 h-120 Z M208 302 h112 v28 h-112 Z" android:fillColor="#000000" />
+</vector>
