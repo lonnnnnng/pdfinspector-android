@@ -28,4 +28,13 @@ object ElementEditor {
         page.setContents(stream)
         return kept
     }
+
+    // Captures the page's current content stream so an edit can be reverted.
+    fun snapshot(page: PDPage): ByteArray? = page.contents?.use { it.readBytes() }
+
+    fun restore(document: PDDocument, page: PDPage, content: ByteArray) {
+        val stream = PDStream(document)
+        stream.createOutputStream(COSName.FLATE_DECODE).use { out -> out.write(content) }
+        page.setContents(stream)
+    }
 }

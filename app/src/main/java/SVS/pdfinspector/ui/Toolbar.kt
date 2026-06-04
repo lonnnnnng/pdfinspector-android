@@ -30,6 +30,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import compose.icons.TablerIcons
+import compose.icons.tablericons.ArrowBackUp
+import compose.icons.tablericons.ArrowForwardUp
 import compose.icons.tablericons.AspectRatio
 import compose.icons.tablericons.ChevronLeft
 import compose.icons.tablericons.ChevronRight
@@ -46,11 +48,15 @@ fun InspectorToolbar(
     pageIndex: Int,
     pageCount: Int,
     dirty: Boolean,
+    canUndo: Boolean,
+    canRedo: Boolean,
     onFitWidth: () -> Unit,
     onFitHeight: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onPrev: () -> Unit,
     onNext: () -> Unit,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
     onOpen: () -> Unit,
     onSave: () -> Unit,
     onSettings: () -> Unit,
@@ -100,6 +106,14 @@ fun InspectorToolbar(
             Text("${pageIndex + 1} / $pageCount", style = MaterialTheme.typography.labelLarge)
             IconButton(onClick = onNext, enabled = pageIndex < pageCount - 1) {
                 Icon(TablerIcons.ChevronRight, "Next page", Modifier.size(20.dp))
+            }
+
+            ToolDivider()
+            IconButton(onClick = onUndo, enabled = canUndo) {
+                Icon(TablerIcons.ArrowBackUp, "Undo", Modifier.size(20.dp))
+            }
+            IconButton(onClick = onRedo, enabled = canRedo) {
+                Icon(TablerIcons.ArrowForwardUp, "Redo", Modifier.size(20.dp))
             }
 
             ToolDivider()

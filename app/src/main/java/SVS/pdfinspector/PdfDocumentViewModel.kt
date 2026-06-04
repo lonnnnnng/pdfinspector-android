@@ -45,6 +45,10 @@ class PdfDocumentViewModel : ViewModel() {
     private var cacheFile: File? = null
     private val renderMutex = Mutex()
 
+    private val undoStack = ArrayDeque<EditSnapshot>()
+    private val redoStack = ArrayDeque<EditSnapshot>()
+    private var historyBytes = 0L
+
     fun open(context: Context, uri: Uri) {
         state = state.copy(loading = true, error = null)
         viewModelScope.launch {
@@ -59,6 +63,7 @@ class PdfDocumentViewModel : ViewModel() {
                 }
                 document?.close()
                 closeRenderer()
+                clearHistory()
                 document = loaded.first
                 cacheFile = loaded.second
                 openRenderer(loaded.second)
@@ -70,6 +75,8 @@ class PdfDocumentViewModel : ViewModel() {
                     pageIndex = 0,
                     fileName = displayName(context, uri),
                     documentToken = state.documentToken + 1,
+                    canUndo = false,
+                    canRedo = false,
                 )
             } catch (t: Throwable) {
                 Log.e(TAG, "open failed", t)
@@ -105,18 +112,70 @@ class PdfDocumentViewModel : ViewModel() {
         val doc = document ?: return
         val parsedPage = parsed ?: return
         val node = findNode(parsedPage.root, state.selectedId) ?: return
+        val pageIndex = state.pageIndex
         viewModelScope.launch {
             state = state.copy(loading = true)
             withContext(Dispatchers.IO) {
+                recordUndo(doc, pageIndex)
                 ElementEditor.deleteRange(
-                    doc, doc.getPage(state.pageIndex), parsedPage.tokens,
+                    doc, doc.getPage(pageIndex), parsedPage.tokens,
                     node.startIndex, node.endIndex,
                 )
             }
             resyncCacheAndReopen()
-            renderPage(state.pageIndex)
-            state = state.copy(loading = false, dirty = true)
+            renderPage(pageIndex)
+            state = state.copy(loading = false, dirty = true, canUndo = true, canRedo = false)
         }
+    }
+
+    fun undo() = stepHistory(undoStack, redoStack)
+
+    fun redo() = stepHistory(redoStack, undoStack)
+
+    private fun stepHistory(from: ArrayDeque<EditSnapshot>, to: ArrayDeque<EditSnapshot>) {
+        val doc = document ?: return
+        if (from.isEmpty()) return
+        viewModelScope.launch {
+            state = state.copy(loading = true)
+            val entry = from.removeLast()
+            historyBytes -= entry.content.size
+            val pageIndex = entry.pageIndex
+            withContext(Dispatchers.IO) {
+                val page = doc.getPage(pageIndex)
+                val current = ElementEditor.snapshot(page) ?: ByteArray(0)
+                to.addLast(EditSnapshot(pageIndex, current))
+                historyBytes += current.size
+                ElementEditor.restore(doc, page, entry.content)
+            }
+            resyncCacheAndReopen()
+            renderPage(pageIndex)
+            state = state.copy(
+                loading = false,
+                pageIndex = pageIndex,
+                dirty = true,
+                canUndo = undoStack.isNotEmpty(),
+                canRedo = redoStack.isNotEmpty(),
+            )
+        }
+    }
+
+    // Capped both ways so history never grows without bound.
+    private fun recordUndo(doc: PDDocument, pageIndex: Int) {
+        val content = ElementEditor.snapshot(doc.getPage(pageIndex)) ?: ByteArray(0)
+        undoStack.addLast(EditSnapshot(pageIndex, content))
+        historyBytes += content.size
+        for (e in redoStack) historyBytes -= e.content.size
+        redoStack.clear()
+        while (undoStack.size > MAX_HISTORY || historyBytes > MAX_HISTORY_BYTES) {
+            if (undoStack.size <= 1) break
+            historyBytes -= undoStack.removeFirst().content.size
+        }
+    }
+
+    private fun clearHistory() {
+        undoStack.clear()
+        redoStack.clear()
+        historyBytes = 0
     }
 
     fun saveCopy(context: Context, uri: Uri) {
@@ -237,8 +296,12 @@ class PdfDocumentViewModel : ViewModel() {
     companion object {
         const val RENDER_DPI = 144f
         private const val TAG = "PdfInspector"
+        private const val MAX_HISTORY = 50
+        private const val MAX_HISTORY_BYTES = 16L * 1024 * 1024
     }
 }
+
+private class EditSnapshot(val pageIndex: Int, val content: ByteArray)
 
 data class PdfUiState(
     val loading: Boolean = false,
@@ -254,6 +317,8 @@ data class PdfUiState(
     val expanded: Set<Int> = emptySet(),
     val showRaw: Boolean = false,
     val dirty: Boolean = false,
+    val canUndo: Boolean = false,
+    val canRedo: Boolean = false,
     val documentToken: Int = 0,
     val error: String? = null,
 )
