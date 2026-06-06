@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -20,6 +21,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.delay
 
 data class LeafRect(val id: Int, val rect: Rect)
 
@@ -44,6 +46,15 @@ fun PdfCanvas(
 
         var scale by remember { mutableFloatStateOf(1f) }
         var offset by remember { mutableStateOf(Offset.Zero) }
+
+        var showDebug by remember { mutableStateOf(false) }
+        var mem by remember { mutableStateOf(MemStats(0, 0, 0)) }
+        LaunchedEffect(showDebug) {
+            while (showDebug) {
+                mem = readMemStats()
+                delay(1000)
+            }
+        }
 
         fun fitWidth() {
             if (viewportW > 0f && bitmap.width > 0) {
@@ -73,6 +84,7 @@ fun PdfCanvas(
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
+                .fourFingerTap { showDebug = !showDebug }
                 .pointerInput(bitmap) {
                     detectTransformGestures { centroid, pan, zoom, _ ->
                         if (zoom != 1f || pan != Offset.Zero) onUserTransform()
@@ -105,6 +117,15 @@ fun PdfCanvas(
                     )
                 }
             }
+        }
+
+        if (showDebug) {
+            DebugOverlay(
+                bitmap = bitmap,
+                scale = scale,
+                mem = mem,
+                modifier = Modifier.align(Alignment.TopStart),
+            )
         }
     }
 }
