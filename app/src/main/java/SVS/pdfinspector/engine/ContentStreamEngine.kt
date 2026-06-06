@@ -10,8 +10,10 @@ import com.tom_roush.pdfbox.cos.COSString
 import com.tom_roush.pdfbox.pdfparser.PDFStreamParser
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDResources
+import com.tom_roush.pdfbox.pdmodel.font.PDFont
 import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
+import java.io.ByteArrayInputStream
 
 object ContentStreamEngine {
 
@@ -48,6 +50,8 @@ object ContentStreamEngine {
         private var textLineMatrix = Affine.IDENTITY
         private var fontSize = 0f
         private var fontName = ""
+        private var currentFont: PDFont? = null
+        private val fontCache = HashMap<String, PDFont?>()
         private var leading = 0f
         private val textPreview = StringBuilder()
         private val textFull = StringBuilder()
@@ -125,8 +129,10 @@ object ContentStreamEngine {
                     inText = false
                 }
                 "Tf" -> if (operands.size >= 2) {
-                    fontName = (operands[0] as? COSName)?.name ?: fontName
+                    val fontCos = operands[0] as? COSName
+                    fontName = fontCos?.name ?: fontName
                     fontSize = num(1)
+                    currentFont = if (fontCos == null) null else resolveFont(fontCos)
                 }
                 "TL" -> if (operands.isNotEmpty()) leading = num(0)
                 "Td" -> if (operands.size >= 2) moveTextLine(num(0), num(1))
@@ -219,19 +225,62 @@ object ContentStreamEngine {
             textMatrix = textLineMatrix
         }
 
+        private fun resolveFont(name: COSName): PDFont? =
+            fontCache.getOrPut(name.name) {
+                try {
+                    resources?.getFont(name)
+                } catch (_: Exception) {
+                    null
+                }
+            }
+
         private fun showText(s: COSString?) {
             if (s == null) return
             val bytes = s.bytes
-            appendPreview(bytes)
-            appendFull(bytes)
-            val w = bytes.size * fontSize * 0.5f
+            val font = currentFont
+            val advance: Float
+            val decoded = if (font != null) decodeWithFont(font, bytes) else null
+            if (decoded != null) {
+                appendText(decoded.text)
+                advance = decoded.width
+            } else {
+                appendText(asciiFallback(bytes))
+                advance = bytes.size * fontSize * 0.5f
+            }
             val ascent = fontSize * 0.75f
             val descent = -fontSize * 0.25f
             val m = textMatrix.then(ctm())
-            includeQuad(textBounds, m, w, ascent, descent)
-            includeQuad(runBounds, m, w, ascent, descent)
-            textMatrix = Affine.translate(w, 0f).then(textMatrix)
+            includeQuad(textBounds, m, advance, ascent, descent)
+            includeQuad(runBounds, m, advance, ascent, descent)
+            textMatrix = Affine.translate(advance, 0f).then(textMatrix)
         }
+
+        private class Decoded(val text: String, val width: Float)
+
+        private fun decodeWithFont(font: PDFont, bytes: ByteArray): Decoded? =
+            try {
+                val sb = StringBuilder()
+                var width = 0f
+                val input = ByteArrayInputStream(bytes)
+                while (input.available() > 0) {
+                    val code = font.readCode(input)
+                    val u = try {
+                        font.toUnicode(code)
+                    } catch (_: Exception) {
+                        null
+                    }
+                    if (u != null) sb.append(u)
+                    else if (code in 32..126) sb.append(code.toChar())
+                    width += try {
+                        font.getDisplacement(code).x * fontSize
+                    } catch (_: Exception) {
+                        fontSize * 0.5f
+                    }
+                }
+                Decoded(sb.toString(), width)
+            } catch (_: Exception) {
+                null
+            }
 
         private fun includeQuad(b: Bounds, m: Affine, w: Float, ascent: Float, descent: Float) {
             b.include(m.mapX(0f, descent), m.mapY(0f, descent))
@@ -247,6 +296,7 @@ object ContentStreamEngine {
                     is COSString -> showText(el)
                     is COSNumber -> {
                         val tx = -el.floatValue() / 1000f * fontSize
+                        if (tx > 0.2f * fontSize) appendText(" ")
                         textMatrix = Affine.translate(tx, 0f).then(textMatrix)
                     }
                 }
@@ -400,23 +450,23 @@ object ContentStreamEngine {
             leaves.add(node)
         }
 
-        private fun appendPreview(bytes: ByteArray) {
-            if (textPreview.length >= 40) return
-            for (byte in bytes) {
-                val v = byte.toInt() and 0xFF
-                if (v in 32..126) textPreview.append(v.toChar())
-                if (textPreview.length >= 40) break
+        private fun appendText(text: String) {
+            if (text.isEmpty()) return
+            runText.append(text)
+            textFull.append(text)
+            if (textPreview.length < 40) {
+                val room = 40 - textPreview.length
+                textPreview.append(if (text.length > room) text.substring(0, room) else text)
             }
         }
 
-        private fun appendFull(bytes: ByteArray) {
+        private fun asciiFallback(bytes: ByteArray): String {
+            val sb = StringBuilder()
             for (byte in bytes) {
                 val v = byte.toInt() and 0xFF
-                if (v in 32..126) {
-                    textFull.append(v.toChar())
-                    runText.append(v.toChar())
-                }
+                if (v in 32..126) sb.append(v.toChar())
             }
+            return sb.toString()
         }
 
         private fun num(i: Int): Float = (operands.getOrNull(i) as? COSNumber)?.floatValue() ?: 0f

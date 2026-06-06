@@ -1,6 +1,7 @@
 package SVS.pdfinspector.ui
 
 import android.os.Debug
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -17,7 +18,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -88,32 +89,22 @@ fun Modifier.fourFingerTap(onTap: () -> Unit): Modifier = pointerInput(Unit) {
         var endTime = startTime
         var maxPointers = 1
         var active = false
-        var anchor = Offset.Zero
         var moved = false
+        val starts = mutableMapOf<PointerId, Offset>()
         while (true) {
             val event = awaitPointerEvent(PointerEventPass.Initial)
             val pressed = event.changes.filter { it.pressed }
             if (pressed.size > maxPointers) maxPointers = pressed.size
-            if (!active && pressed.size >= 4) {
-                active = true
-                anchor = centroid(pressed)
+            if (!active && pressed.size >= 4) active = true
+            for (c in pressed) {
+                val origin = starts.getOrPut(c.id) { c.position }
+                if ((c.position - origin).getDistance() > slop) moved = true
             }
-            if (active) {
-                if (pressed.isNotEmpty() && (centroid(pressed) - anchor).getDistance() > slop) {
-                    moved = true
-                }
-                event.changes.forEach { it.consume() }
-            }
+            if (active) event.changes.forEach { it.consume() }
             endTime = event.changes.maxOf { it.uptimeMillis }
             if (pressed.isEmpty()) break
         }
-        if (maxPointers == 4 && !moved && endTime - startTime <= TAP_TIMEOUT_MS) onTap()
+        Log.d("DebugHud", "gesture max=$maxPointers moved=$moved dur=${endTime - startTime}")
+        if (maxPointers >= 4 && !moved && endTime - startTime <= TAP_TIMEOUT_MS) onTap()
     }
-}
-
-private fun centroid(changes: List<PointerInputChange>): Offset {
-    if (changes.isEmpty()) return Offset.Zero
-    var sum = Offset.Zero
-    for (c in changes) sum += c.position
-    return sum / changes.size.toFloat()
 }

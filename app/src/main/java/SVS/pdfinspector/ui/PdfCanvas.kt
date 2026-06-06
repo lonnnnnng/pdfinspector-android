@@ -84,7 +84,10 @@ fun PdfCanvas(
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .fourFingerTap { showDebug = !showDebug }
+                .fourFingerTap {
+                    showDebug = !showDebug
+                    android.util.Log.d("DebugHud", "toggle=$showDebug")
+                }
                 .pointerInput(bitmap) {
                     detectTransformGestures { centroid, pan, zoom, _ ->
                         if (zoom != 1f || pan != Offset.Zero) onUserTransform()
