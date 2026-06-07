@@ -1,1 +1,1 @@
-Inspect, select and delete the elements inside any PDF
+Inspect, select, edit and delete the elements inside any PDF

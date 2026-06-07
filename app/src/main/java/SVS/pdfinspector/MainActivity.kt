@@ -368,7 +368,7 @@ private fun EmptyState(onOpen: () -> Unit) {
         Text("Inspect any PDF", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "Open a document to explore its elements, select them on the page or in the tree, and delete what you don't need.",
+            text = "Open a document to explore its elements, select them on the page or in the tree, then move, resize, recolor, edit text or delete them.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,

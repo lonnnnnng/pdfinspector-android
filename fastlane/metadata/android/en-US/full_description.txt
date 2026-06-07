@@ -1,10 +1,11 @@
-PDF Inspector opens a PDF and shows what is actually inside it. Like a browser's developer tools, it parses each page's content stream into a navigable tree of elements — text blocks, vector paths and images — so you can find any single element, select it on the page or in the tree, and delete it. Edits go to a saved copy; your original file is never touched.
+PDF Inspector opens a PDF and shows what is actually inside it. Like a browser's developer tools, it parses each page's content stream into a navigable tree of elements (text blocks, vector paths and images) so you can find any single element, select it on the page or in the tree, and edit it. Edits go to a saved copy; your original file is never touched.
 
 Highlights:
 
 * DevTools-style element tree: every page is parsed into a structured tree of text, path and image nodes, grouped the way the PDF draws them. Switch between friendly labels and the raw content-stream operators.
-* Two-way selection: tap an element on the page or tap its row in the tree — the other side highlights to match, with a clear bordered outline on the canvas.
-* Surgical delete: remove exactly the element you picked by rewriting just its part of the content stream, leaving the rest of the page untouched. Full undo and redo.
+* Two-way selection: tap an element on the page or tap its row in the tree, and the other side highlights to match, with a clear bordered outline on the canvas.
+* Edit in place: move and resize an element, recolor its fill or stroke (entered as hex, with the element's color space shown), and even retype text. Changes are written straight back into the content stream, with full undo and redo.
+* Surgical delete: remove exactly the element you picked by rewriting just its part of the content stream, leaving the rest of the page untouched.
 * Save a copy: write your edited PDF to a new file through the system file picker; the source document is left unchanged.
 * Smooth viewing: pan and pinch-zoom, fit to width or height, a global zoom that carries across pages, and a full-screen mode.
 * Dockable inspector: the inspector panel docks to the side in landscape or the bottom in portrait, can be resized, and can be made transparent to see the page through it.
@@ -13,6 +14,6 @@ Highlights:
 Private and open:
 
 * Open source, no accounts, no telemetry.
-* No network access and no storage permission — files are opened and saved through Android's Storage Access Framework, so the app only ever touches the documents you explicitly pick.
+* No network access and no storage permission: files are opened and saved through Android's Storage Access Framework, so the app only ever touches the documents you explicitly pick.
 
-PDF Inspector focuses on manipulating the elements a PDF already contains — select, delete and (coming next) move and resize. It is not a word-processor-style text editor: it works with the drawing primitives in the file rather than reflowing text.
+PDF Inspector works with the drawing primitives a PDF already contains: select, move, resize, recolor, retype and delete them. It is not a word-processor-style text editor, so text editing is experimental and depends on the glyphs the font provides rather than reflowing text.
