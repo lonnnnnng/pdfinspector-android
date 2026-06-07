@@ -1,8 +1,12 @@
 package SVS.pdfinspector.engine
 
 import com.tom_roush.pdfbox.contentstream.operator.Operator
+import com.tom_roush.pdfbox.cos.COSArray
+import com.tom_roush.pdfbox.cos.COSBase
+import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSFloat
 import com.tom_roush.pdfbox.cos.COSName
+import com.tom_roush.pdfbox.cos.COSStream
 import com.tom_roush.pdfbox.cos.COSString
 import com.tom_roush.pdfbox.pdfwriter.ContentStreamWriter
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -56,13 +60,21 @@ object ElementEditor {
         return kept
     }
 
+    private fun writeStream(document: PDDocument, page: PDPage, tokens: List<Any>) {
+        val stream = PDStream(document)
+        stream.createOutputStream(COSName.FLATE_DECODE).use { out ->
+            ContentStreamWriter(out).writeTokens(tokens)
+        }
+        commit(document, page, stream)
+    }
+
     // Captures the page's current content stream so an edit can be reverted.
     fun snapshot(page: PDPage): ByteArray? = page.contents?.use { it.readBytes() }
 
     fun restore(document: PDDocument, page: PDPage, content: ByteArray) {
         val stream = PDStream(document)
         stream.createOutputStream(COSName.FLATE_DECODE).use { out -> out.write(content) }
-        page.setContents(stream)
+        commit(document, page, stream)
     }
 
     // Geometry needs a q/cm/Q wrapper, illegal inside a text object, so it is
@@ -173,12 +185,31 @@ object ElementEditor {
         out.add(Operator.getOperator(if (stroke) "RG" else "rg"))
     }
 
-    private fun writeStream(document: PDDocument, page: PDPage, tokens: List<Any>) {
-        val stream = PDStream(document)
-        stream.createOutputStream(COSName.FLATE_DECODE).use { out ->
-            ContentStreamWriter(out).writeTokens(tokens)
-        }
+    // Swap the page's content stream and flag the changed objects so
+    // PDDocument.saveIncremental rewrites just them, not the whole file.
+    // Incremental save only emits objects reachable from the trailer whose flag
+    // is set, so the whole chain catalog -> pages -> page must be flagged; the
+    // previous stream is unflagged so superseded edits don't pile up.
+    private fun commit(document: PDDocument, page: PDPage, stream: PDStream) {
+        clearContentsFlag(page.cosObject.getDictionaryObject(COSName.CONTENTS))
         page.setContents(stream)
+        stream.cosObject.setNeedToBeUpdated(true)
+        var dict: COSDictionary? = page.cosObject
+        while (dict != null) {
+            dict.setNeedToBeUpdated(true)
+            dict = dict.getDictionaryObject(COSName.PARENT) as? COSDictionary
+        }
+        document.documentCatalog.cosObject.setNeedToBeUpdated(true)
+    }
+
+    private fun clearContentsFlag(contents: COSBase?) {
+        when (contents) {
+            is COSStream -> contents.setNeedToBeUpdated(false)
+            is COSArray -> for (i in 0 until contents.size()) {
+                (contents.getObject(i) as? COSStream)?.setNeedToBeUpdated(false)
+            }
+            else -> {}
+        }
     }
 
     private fun isOp(token: Any?, name: String): Boolean =

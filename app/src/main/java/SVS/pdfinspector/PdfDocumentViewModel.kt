@@ -357,14 +357,23 @@ class PdfDocumentViewModel : ViewModel() {
         pfd = null
     }
 
-    // After an in-memory edit the cache file is stale; rewrite it from the doc
-    // and reopen pdfium on the fresh bytes.
+    // After an in-memory edit the cache file is stale; rewrite it and reopen
+    // pdfium on the fresh bytes. saveIncremental appends only the changed objects
+    // to the original, so editing one page skips re-serializing the whole doc.
+    // Falls back to a full save if the doc has no retained source.
     private suspend fun resyncCacheAndReopen() {
         val doc = document ?: return
         val file = cacheFile ?: return
         renderMutex.withLock {
             closeRenderer()
-            withContext(Dispatchers.IO) { file.outputStream().use { doc.save(it) } }
+            withContext(Dispatchers.IO) {
+                try {
+                    file.outputStream().use { doc.saveIncremental(it) }
+                } catch (t: Throwable) {
+                    Log.w(TAG, "incremental save failed, full save", t)
+                    file.outputStream().use { doc.save(it) }
+                }
+            }
             openRenderer(file)
         }
     }

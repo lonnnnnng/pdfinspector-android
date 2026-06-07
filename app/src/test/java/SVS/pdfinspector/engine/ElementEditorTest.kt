@@ -7,6 +7,7 @@ import com.tom_roush.pdfbox.pdmodel.PDPage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.ByteArrayOutputStream
 
 // These stay path-only / font-free so they run on a plain JVM. The text
 // re-encode success path needs the font AFMs that pdfbox-android ships as
@@ -67,6 +68,47 @@ class ElementEditorTest {
         assertTrue("Q present", ops.contains("Q"))
         assertTrue("no cm for color-only", !ops.contains("cm"))
         doc.close()
+    }
+
+    @Test
+    fun incrementalSaveReflectsEditOnReload() {
+        val doc = PDDocument.load(pathPdf())
+        val page = doc.getPage(0)
+        val parsed = ContentStreamEngine.parse(page)
+        val path = parsed.leaves.first { it.kind == NodeKind.PATH }
+        ElementEditor.editElement(doc, page, parsed.tokens, path, EditRequest(dx = 10f))
+
+        val out = ByteArrayOutputStream()
+        doc.saveIncremental(out)
+        doc.close()
+
+        val reloaded = PDDocument.load(out.toByteArray())
+        val moved = ContentStreamEngine.parse(reloaded.getPage(0))
+            .leaves.first { it.kind == NodeKind.PATH }
+        assertEquals(60f, moved.bounds!!.minX, 0.5f)
+        reloaded.close()
+    }
+
+    @Test
+    fun twoIncrementalEditsBothSurvive() {
+        val doc = PDDocument.load(pathPdf())
+        val page = doc.getPage(0)
+        var parsed = ContentStreamEngine.parse(page)
+        var path = parsed.leaves.first { it.kind == NodeKind.PATH }
+        ElementEditor.editElement(doc, page, parsed.tokens, path, EditRequest(dx = 10f))
+        parsed = ContentStreamEngine.parse(page)
+        path = parsed.leaves.first { it.kind == NodeKind.PATH }
+        ElementEditor.editElement(doc, page, parsed.tokens, path, EditRequest(dy = 5f))
+
+        val out = ByteArrayOutputStream()
+        doc.saveIncremental(out)
+        doc.close()
+
+        val reloaded = PDDocument.load(out.toByteArray())
+        val p = ContentStreamEngine.parse(reloaded.getPage(0)).leaves.first { it.kind == NodeKind.PATH }
+        assertEquals(60f, p.bounds!!.minX, 0.5f)
+        assertEquals(55f, p.bounds!!.minY, 0.5f)
+        reloaded.close()
     }
 
     @Test
