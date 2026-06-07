@@ -1,9 +1,13 @@
 package SVS.pdfinspector.engine
 
+import com.tom_roush.pdfbox.pdmodel.font.PDFont
+
 enum class NodeKind { GROUP, TEXT, PATH, IMAGE }
 
 // One node in the inspector tree, mapped to a contiguous run of content-stream
 // tokens [startIndex, endIndex] so it can be highlighted, deleted, or rewritten.
+// ctm is the CTM active at the node, used to map page-space edits into the local
+// matrix of a q/cm/Q wrapper; font is the run's font, used to re-encode text.
 class DrawNode(
     val id: Int,
     val kind: NodeKind,
@@ -16,6 +20,8 @@ class DrawNode(
     val raw: String,
     val children: List<DrawNode>,
     val text: String? = null,
+    val ctm: Affine? = null,
+    val font: PDFont? = null,
 )
 
 class ParsedPage(

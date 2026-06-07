@@ -326,6 +326,7 @@ object ContentStreamEngine {
                     raw = rawSlice(opStart, opIndex),
                     children = emptyList(),
                     text = runText.toString(),
+                    font = currentFont,
                 ),
             )
         }
@@ -348,6 +349,7 @@ object ContentStreamEngine {
                     raw = rawSlice(textStart, endIndex),
                     children = textRuns,
                     text = textFull.toString(),
+                    ctm = ctm(),
                 ),
             )
         }
@@ -384,6 +386,7 @@ object ContentStreamEngine {
                         colorArgb = if (stroked) strokeColor else fillColor,
                         raw = rawSlice(pathStart, endIndex),
                         children = emptyList(),
+                        ctm = ctm(),
                     ),
                 )
             }
@@ -421,6 +424,7 @@ object ContentStreamEngine {
                     colorArgb = null,
                     raw = rawSlice(start, endIndex),
                     children = emptyList(),
+                    ctm = ctm(),
                 ),
             )
         }
