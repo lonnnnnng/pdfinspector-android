@@ -297,6 +297,7 @@ private fun Workspace(
             onToggleDock = onToggleDock,
             onToggleTransparent = onToggleTransparent,
             onDelete = { viewModel.deleteSelected() },
+            onEdit = { id -> viewModel.beginEdit(id) },
         )
     }
 

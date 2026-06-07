@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import compose.icons.TablerIcons
 import compose.icons.tablericons.Code
 import compose.icons.tablericons.Droplet
+import compose.icons.tablericons.Edit
 import compose.icons.tablericons.LayoutBottombar
 import compose.icons.tablericons.LayoutSidebarRight
 import compose.icons.tablericons.Trash
@@ -65,6 +66,7 @@ fun InspectorPane(
     onToggleDock: () -> Unit,
     onToggleTransparent: () -> Unit,
     onDelete: () -> Unit,
+    onEdit: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxWidth()) {
@@ -127,7 +129,7 @@ fun InspectorPane(
         }
         LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
             items(rows, key = { it.node.id }) { row ->
-                TreeRowItem(row, row.node.id == selectedId, showRaw, onSelect, onToggleExpand)
+                TreeRowItem(row, row.node.id == selectedId, showRaw, onSelect, onToggleExpand, onEdit)
             }
         }
     }
@@ -154,6 +156,7 @@ private fun TreeRowItem(
     showRaw: Boolean,
     onSelect: (Int) -> Unit,
     onToggleExpand: (Int) -> Unit,
+    onEdit: (Int) -> Unit,
 ) {
     val node = row.node
     val background =
@@ -207,6 +210,12 @@ private fun TreeRowItem(
                     .clip(RoundedCornerShape(3.dp))
                     .background(Color(argb)),
             )
+        }
+        if (selected && node.kind != NodeKind.GROUP) {
+            Spacer(Modifier.width(4.dp))
+            IconButton(onClick = { onEdit(node.id) }, modifier = Modifier.size(28.dp)) {
+                Icon(TablerIcons.Edit, "Edit element", Modifier.size(18.dp))
+            }
         }
     }
 }
