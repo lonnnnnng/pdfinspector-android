@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -55,6 +56,7 @@ fun ElementEditSheet(
     var fill by remember(id) { mutableStateOf(target.fillArgb?.let(::argbToHex) ?: "") }
     var stroke by remember(id) { mutableStateOf(target.strokeArgb?.let(::argbToHex) ?: "") }
     var text by remember(id) { mutableStateOf(target.text ?: "") }
+    var useFallback by remember(id) { mutableStateOf(false) }
     var fontId by remember(id) { mutableStateOf<String?>(null) }
 
     val importLauncher = rememberLauncherForActivityResult(
@@ -134,15 +136,27 @@ fun ElementEditSheet(
                     label = { Text("Text") },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                FontPicker(
-                    options = target.fontOptions,
-                    selectedId = fontId,
-                    onSelect = { fontId = it },
-                    onAddCustom = { importLauncher.launch("*/*") },
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = useFallback,
+                        onCheckedChange = { on ->
+                            useFallback = on
+                            if (on && fontId == null) fontId = AUTO_FONT_ID
+                        },
+                    )
+                    Text("Use fallback font")
+                }
+                if (useFallback) {
+                    FontPicker(
+                        options = target.fontOptions,
+                        selectedId = fontId ?: AUTO_FONT_ID,
+                        onSelect = { fontId = it },
+                        onAddCustom = { importLauncher.launch("*/*") },
+                    )
+                }
                 Text(
-                    "Text is re-encoded with the chosen font. Keep the original " +
-                        "when it has the characters, or pick a fallback if it does not.",
+                    "Re-encoded with the element's font. Turn on a fallback when " +
+                        "the original font is missing characters.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -155,7 +169,10 @@ fun ElementEditSheet(
                 TextButton(onClick = onDismiss) { Text("Cancel") }
                 Button(onClick = {
                     onApply(
-                        buildRequest(target, x, y, w, h, fill, stroke, text, fontId),
+                        buildRequest(
+                            target, x, y, w, h, fill, stroke, text,
+                            if (useFallback) fontId ?: AUTO_FONT_ID else null,
+                        ),
                     )
                 }) { Text("Apply") }
             }
@@ -184,32 +201,28 @@ private fun NumberField(
 @Composable
 private fun FontPicker(
     options: List<FontOption>,
-    selectedId: String?,
-    onSelect: (String?) -> Unit,
+    selectedId: String,
+    onSelect: (String) -> Unit,
     onAddCustom: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val label = when (selectedId) {
-        null -> "Keep original font"
-        AUTO_FONT_ID -> "Auto (match original)"
-        else -> options.firstOrNull { it.id == selectedId }?.let(::fontLabel) ?: "Keep original font"
+    val label = if (selectedId == AUTO_FONT_ID) {
+        "Auto (match original)"
+    } else {
+        options.firstOrNull { it.id == selectedId }?.let(::fontLabel) ?: "Auto (match original)"
     }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
         OutlinedTextField(
             value = label,
             onValueChange = {},
             readOnly = true,
-            label = { Text("Font") },
+            label = { Text("Fallback font") },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier
                 .menuAnchor(MenuAnchorType.PrimaryNotEditable)
                 .fillMaxWidth(),
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
-                text = { Text("Keep original font") },
-                onClick = { onSelect(null); expanded = false },
-            )
             DropdownMenuItem(
                 text = { Text("Auto (match original)") },
                 onClick = { onSelect(AUTO_FONT_ID); expanded = false },
