@@ -21,6 +21,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -43,14 +44,20 @@ fun DebugOverlay(
     bitmap: ImageBitmap,
     scale: Float,
     mem: MemStats,
+    tilePx: IntSize? = null,
     modifier: Modifier = Modifier,
 ) {
     val bmpMb = bitmap.width.toLong() * bitmap.height * 4 / (1024.0 * 1024.0)
+    val tile = tilePx?.let {
+        val mb = it.width.toLong() * it.height * 4 / (1024.0 * 1024.0)
+        "${it.width} x ${it.height}  %.1f MB".format(mb)
+    } ?: "off"
     val rows = listOf(
         "RAM" to "${mem.pssMb} MB",
         "Heap" to "${mem.heapUsedMb} / ${mem.heapMaxMb} MB",
         "Res" to "${bitmap.width} x ${bitmap.height} px",
         "Bitmap" to "%.1f MB".format(bmpMb),
+        "Tile" to tile,
         "Zoom" to "%.2fx".format(scale),
     )
     Column(

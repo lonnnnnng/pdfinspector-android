@@ -191,6 +191,7 @@ fun PdfCanvas(
                 bitmap = bitmap,
                 scale = scale,
                 mem = mem,
+                tilePx = sharpTile?.let { IntSize(it.image.width, it.image.height) },
                 modifier = Modifier.align(Alignment.TopStart),
             )
         }
