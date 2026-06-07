@@ -205,7 +205,10 @@ fun InspectorScreen(
                     fitMode = fitMode,
                     onUserTransform = { fitMode = FitMode.NONE },
                     onToggleDock = { dock = if (dock == Dock.BOTTOM) Dock.SIDE else Dock.BOTTOM },
-                    onToggleTransparent = { transparent = !transparent },
+                    onToggleTransparent = {
+                        transparent = !transparent
+                        fitMode = FitMode.NONE
+                    },
                 )
                 state.busy?.let { BusyOverlay(it) }
             }
