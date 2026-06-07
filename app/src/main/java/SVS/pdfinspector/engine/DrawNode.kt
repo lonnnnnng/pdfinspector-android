@@ -22,6 +22,8 @@ class DrawNode(
     val text: String? = null,
     val ctm: Affine? = null,
     val font: PDFont? = null,
+    val fontResourceName: String? = null,
+    val fontSize: Float = 0f,
     val colorSpace: String? = null,
 )
 

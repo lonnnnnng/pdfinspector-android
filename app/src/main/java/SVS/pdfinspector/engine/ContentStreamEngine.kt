@@ -412,6 +412,8 @@ object ContentStreamEngine {
                     children = emptyList(),
                     text = runText.toString(),
                     font = currentFont,
+                    fontResourceName = fontName,
+                    fontSize = fontSize,
                     colorSpace = fillModel,
                 ),
             )
