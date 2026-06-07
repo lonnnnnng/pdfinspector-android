@@ -21,6 +21,10 @@ import androidx.lifecycle.viewModelScope
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.rendering.PDFRenderer
 import SVS.pdfinspector.engine.ContentStreamEngine
+import SVS.pdfinspector.engine.DrawNode
+import SVS.pdfinspector.engine.EditCaps
+import SVS.pdfinspector.engine.EditRequest
+import SVS.pdfinspector.engine.EditResult
 import SVS.pdfinspector.engine.ElementEditor
 import SVS.pdfinspector.engine.ParsedPage
 import SVS.pdfinspector.engine.collectGroupIds
@@ -141,6 +145,70 @@ class PdfDocumentViewModel : ViewModel() {
         }
     }
 
+    fun beginEdit(id: Int) {
+        state = state.copy(selectedId = id, editingId = id)
+    }
+
+    fun cancelEdit() {
+        state = state.copy(editingId = null)
+    }
+
+    fun editTarget(): EditTarget? {
+        val parsedPage = parsed ?: return null
+        val node = findNode(parsedPage.root, state.editingId ?: return null) ?: return null
+        val caps = ElementEditor.capabilities(parsedPage.tokens, node)
+        val b = node.bounds
+        return EditTarget(
+            node = node,
+            caps = caps,
+            x = b?.minX ?: 0f,
+            y = b?.minY ?: 0f,
+            w = b?.width ?: 0f,
+            h = b?.height ?: 0f,
+            fillArgb = if (caps.canFill) node.colorArgb else null,
+            strokeArgb = if (caps.canStroke) node.colorArgb else null,
+            text = if (caps.canText) node.text else null,
+        )
+    }
+
+    fun applyEdit(context: Context, request: EditRequest) {
+        val doc = document ?: return
+        val parsedPage = parsed ?: return
+        val node = findNode(parsedPage.root, state.editingId) ?: return
+        val pageIndex = state.pageIndex
+        viewModelScope.launch {
+            state = state.copy(loading = true)
+            val result = withContext(Dispatchers.IO) {
+                val page = doc.getPage(pageIndex)
+                val before = ElementEditor.snapshot(page) ?: ByteArray(0)
+                val r = ElementEditor.editElement(doc, page, parsedPage.tokens, node, request)
+                if (r is EditResult.Applied) pushUndo(pageIndex, before)
+                r
+            }
+            when (result) {
+                is EditResult.Applied -> {
+                    resyncCacheAndReopen()
+                    renderPage(pageIndex)
+                    state = state.copy(
+                        loading = false, dirty = true,
+                        canUndo = true, canRedo = false, editingId = null,
+                    )
+                }
+                EditResult.TextEncodeFailed -> {
+                    state = state.copy(loading = false)
+                    Toast.makeText(
+                        context, "Could not encode that text in this font", Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                EditResult.Degenerate -> {
+                    state = state.copy(loading = false)
+                    Toast.makeText(context, "Cannot transform this element", Toast.LENGTH_SHORT).show()
+                }
+                EditResult.NoChange -> state = state.copy(loading = false, editingId = null)
+            }
+        }
+    }
+
     fun undo() = stepHistory(undoStack, redoStack)
 
     fun redo() = stepHistory(redoStack, undoStack)
@@ -172,9 +240,12 @@ class PdfDocumentViewModel : ViewModel() {
         }
     }
 
-    // Capped both ways so history never grows without bound.
     private fun recordUndo(doc: PDDocument, pageIndex: Int) {
-        val content = ElementEditor.snapshot(doc.getPage(pageIndex)) ?: ByteArray(0)
+        pushUndo(pageIndex, ElementEditor.snapshot(doc.getPage(pageIndex)) ?: ByteArray(0))
+    }
+
+    // Capped both ways so history never grows without bound.
+    private fun pushUndo(pageIndex: Int, content: ByteArray) {
         undoStack.addLast(EditSnapshot(pageIndex, content))
         historyBytes += content.size
         for (e in redoStack) historyBytes -= e.content.size
@@ -327,6 +398,18 @@ class PdfDocumentViewModel : ViewModel() {
 
 private class EditSnapshot(val pageIndex: Int, val content: ByteArray)
 
+class EditTarget(
+    val node: DrawNode,
+    val caps: EditCaps,
+    val x: Float,
+    val y: Float,
+    val w: Float,
+    val h: Float,
+    val fillArgb: Int?,
+    val strokeArgb: Int?,
+    val text: String?,
+)
+
 data class PdfUiState(
     val loading: Boolean = false,
     val hasDocument: Boolean = false,
@@ -338,6 +421,7 @@ data class PdfUiState(
     val page: ParsedPage? = null,
     val pageTransform: PageTransform? = null,
     val selectedId: Int? = null,
+    val editingId: Int? = null,
     val revealTick: Int = 0,
     val expanded: Set<Int> = emptySet(),
     val showRaw: Boolean = false,
