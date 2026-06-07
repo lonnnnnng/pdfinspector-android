@@ -60,6 +60,7 @@ import compose.icons.tablericons.Settings
 import SVS.pdfinspector.engine.NodeKind
 import SVS.pdfinspector.engine.findNode
 import SVS.pdfinspector.ui.Dock
+import SVS.pdfinspector.ui.ElementEditSheet
 import SVS.pdfinspector.ui.FitMode
 import SVS.pdfinspector.ui.InspectorDock
 import SVS.pdfinspector.ui.InspectorPane
@@ -228,6 +229,17 @@ fun InspectorScreen(
 
     if (showSettings) {
         ThemeSettingsSheet(theme = themeState, onDismiss = { showSettings = false })
+    }
+
+    if (state.editingId != null) {
+        val target = remember(state.editingId, state.page) { viewModel.editTarget() }
+        if (target != null) {
+            ElementEditSheet(
+                target = target,
+                onApply = { req -> viewModel.applyEdit(context, req) },
+                onDismiss = { viewModel.cancelEdit() },
+            )
+        }
     }
 }
 
