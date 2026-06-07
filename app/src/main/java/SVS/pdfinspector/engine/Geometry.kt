@@ -22,9 +22,25 @@ class Affine(
     fun mapX(x: Float, y: Float): Float = a * x + c * y + e
     fun mapY(x: Float, y: Float): Float = b * x + d * y + f
 
+    // Inverse of the affine, or null when the linear part is degenerate.
+    fun inverse(): Affine? {
+        val det = a * d - b * c
+        if (kotlin.math.abs(det) < 1e-6f) return null
+        val ia = d / det
+        val ib = -b / det
+        val ic = -c / det
+        val id = a / det
+        return Affine(ia, ib, ic, id, -(e * ia + f * ic), -(e * ib + f * id))
+    }
+
     companion object {
         val IDENTITY = Affine(1f, 0f, 0f, 1f, 0f, 0f)
         fun translate(tx: Float, ty: Float) = Affine(1f, 0f, 0f, 1f, tx, ty)
+        fun scale(sx: Float, sy: Float) = Affine(sx, 0f, 0f, sy, 0f, 0f)
+
+        // Page-space transform that scales about an anchor, keeping it fixed.
+        fun scaleAbout(sx: Float, sy: Float, ax: Float, ay: Float): Affine =
+            translate(-ax, -ay).then(scale(sx, sy)).then(translate(ax, ay))
     }
 }
 
