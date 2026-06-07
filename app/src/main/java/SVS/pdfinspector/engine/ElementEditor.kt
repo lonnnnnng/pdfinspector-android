@@ -91,10 +91,12 @@ object ElementEditor {
             paint.startsWith("B") || paint.startsWith("b"))
         val pathStroke = path && (paint == "S" || paint == "s" ||
             paint.startsWith("B") || paint.startsWith("b"))
+        // Only offer color where a color token is actually exposed on the node.
+        val hasColor = node.colorArgb != null
         return EditCaps(
             canGeom = canGeom,
-            canFill = pathFill || textObject || textRun,
-            canStroke = pathStroke,
+            canFill = (pathFill || textObject || textRun) && hasColor,
+            canStroke = pathStroke && hasColor,
             canText = textRun,
         )
     }
@@ -135,13 +137,27 @@ object ElementEditor {
             prefix.add(COSFloat(c.d)); prefix.add(COSFloat(c.e)); prefix.add(COSFloat(c.f))
             prefix.add(Operator.getOperator("cm"))
         }
-        request.fillArgb?.let { appendColor(prefix, it, false) }
-        request.strokeArgb?.let { appendColor(prefix, it, true) }
+        // Paths/images carry no color operator inside the wrapped range, so a new
+        // color sits in the prefix. A text object DOES set colors inside BT/ET,
+        // so its fill must be restated before each run to win; done in the body.
+        if (!textObject) {
+            request.fillArgb?.let { appendColor(prefix, it, false) }
+            request.strokeArgb?.let { appendColor(prefix, it, true) }
+        }
 
-        val out = ArrayList<Any>(tokens.size + prefix.size + 1)
+        val out = ArrayList<Any>(tokens.size + prefix.size + 8)
         out.addAll(tokens.subList(0, node.startIndex))
         out.addAll(prefix)
-        out.addAll(tokens.subList(node.startIndex, node.endIndex + 1))
+        val blockFill = if (textObject) request.fillArgb else null
+        if (blockFill != null) {
+            val runStarts = node.children.mapTo(HashSet()) { it.startIndex }
+            for (i in node.startIndex..node.endIndex) {
+                if (i in runStarts) appendColor(out, blockFill, false)
+                out.add(tokens[i])
+            }
+        } else {
+            out.addAll(tokens.subList(node.startIndex, node.endIndex + 1))
+        }
         out.add(Operator.getOperator("Q"))
         out.addAll(tokens.subList(node.endIndex + 1, tokens.size))
         return EditResult.Applied(out)
