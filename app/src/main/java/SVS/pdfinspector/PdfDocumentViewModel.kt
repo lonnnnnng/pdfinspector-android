@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
@@ -414,6 +415,49 @@ class PdfDocumentViewModel : ViewModel() {
             bmp
         }
 
+    // Crisp re-render of just the visible window at the current zoom. The matrix
+    // maps page points (top-left, y-down) onto the tile: scale carries points to
+    // tile pixels, translate pulls the region's corner to the origin. Rotation 0
+    // only; rotated pages keep the upscaled base bitmap.
+    suspend fun renderRegion(
+        pageIndex: Int,
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+        outW: Int,
+        outH: Int,
+    ): Bitmap? {
+        val doc = document ?: return null
+        if (pageIndex < 0 || pageIndex >= doc.numberOfPages) return null
+        val bw = right - left
+        val bh = bottom - top
+        if (bw < 1f || bh < 1f) return null
+        val w = outW.coerceIn(1, MAX_TILE_PX)
+        val h = outH.coerceIn(1, MAX_TILE_PX)
+        return withContext(Dispatchers.IO) {
+            val page = doc.getPage(pageIndex)
+            if (((page.rotation % 360) + 360) % 360 != 0) return@withContext null
+            val s = RENDER_DPI / 72f
+            val matrix = Matrix().apply {
+                setScale((w / bw) * s, (h / bh) * s)
+                postTranslate(-left * (w / bw), -top * (h / bh))
+            }
+            renderMutex.withLock {
+                val renderer = pdfRenderer ?: return@withLock null
+                val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                bmp.eraseColor(Color.WHITE)
+                val pdfPage = renderer.openPage(pageIndex)
+                try {
+                    pdfPage.render(bmp, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                } finally {
+                    pdfPage.close()
+                }
+                bmp
+            }
+        }
+    }
+
     private fun openRenderer(file: File) {
         val fd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
         pfd = fd
@@ -471,6 +515,7 @@ class PdfDocumentViewModel : ViewModel() {
 
     companion object {
         const val RENDER_DPI = 144f
+        private const val MAX_TILE_PX = 4096
         private const val TAG = "PdfInspector"
         private const val MAX_HISTORY = 50
         private const val MAX_HISTORY_BYTES = 16L * 1024 * 1024
