@@ -101,6 +101,15 @@ fun ElementEditSheet(
                 )
             }
 
+            val cs = target.colorSpace
+            if ((caps.canFill || caps.canStroke) && cs != null && cs != "RGB") {
+                Text(
+                    "Color space: $cs. Editing saves it as RGB.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             if (caps.canText) {
                 OutlinedTextField(
                     value = text,

@@ -4,6 +4,7 @@ import com.tom_roush.pdfbox.contentstream.operator.Operator
 import com.tom_roush.pdfbox.cos.COSArray
 import com.tom_roush.pdfbox.cos.COSBase
 import com.tom_roush.pdfbox.cos.COSBoolean
+import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.cos.COSNumber
 import com.tom_roush.pdfbox.cos.COSString
@@ -62,8 +63,12 @@ object ContentStreamEngine {
 
         private var fillColor: Int? = null
         private var strokeColor: Int? = null
+        private var fillModel: String? = null
+        private var strokeModel: String? = null
         private var fillCs: PDColorSpace? = null
         private var strokeCs: PDColorSpace? = null
+        private var fillCsLabel: String? = null
+        private var strokeCsLabel: String? = null
         private val csCache = HashMap<String, PDColorSpace?>()
 
         private class GroupFrame(val openIndex: Int, val children: MutableList<DrawNode> = ArrayList())
@@ -171,16 +176,28 @@ object ContentStreamEngine {
                     showText(operands[2] as? COSString)
                     emitRun(op, opStart, opIndex)
                 }
-                "rg" -> fillColor = rgb(num(0), num(1), num(2))
-                "RG" -> strokeColor = rgb(num(0), num(1), num(2))
-                "g" -> fillColor = rgb(num(0), num(0), num(0))
-                "G" -> strokeColor = rgb(num(0), num(0), num(0))
-                "k" -> fillColor = cmyk(num(0), num(1), num(2), num(3))
-                "K" -> strokeColor = cmyk(num(0), num(1), num(2), num(3))
-                "cs" -> fillCs = colorSpace(operands.lastOrNull() as? COSName)
-                "CS" -> strokeCs = colorSpace(operands.lastOrNull() as? COSName)
-                "sc", "scn" -> resolveCsColor(fillCs)?.let { fillColor = it }
-                "SC", "SCN" -> resolveCsColor(strokeCs)?.let { strokeColor = it }
+                "rg" -> { fillColor = rgb(num(0), num(1), num(2)); fillModel = "RGB" }
+                "RG" -> { strokeColor = rgb(num(0), num(1), num(2)); strokeModel = "RGB" }
+                "g" -> { fillColor = rgb(num(0), num(0), num(0)); fillModel = "Gray" }
+                "G" -> { strokeColor = rgb(num(0), num(0), num(0)); strokeModel = "Gray" }
+                "k" -> { fillColor = cmyk(num(0), num(1), num(2), num(3)); fillModel = "CMYK" }
+                "K" -> { strokeColor = cmyk(num(0), num(1), num(2), num(3)); strokeModel = "CMYK" }
+                "cs" -> {
+                    val n = operands.lastOrNull() as? COSName
+                    fillCs = colorSpace(n); fillCsLabel = describeColorSpace(n)
+                }
+                "CS" -> {
+                    val n = operands.lastOrNull() as? COSName
+                    strokeCs = colorSpace(n); strokeCsLabel = describeColorSpace(n)
+                }
+                "sc", "scn" -> {
+                    resolveCsColor(fillCs)?.let { fillColor = it }
+                    fillModel = fillCsLabel
+                }
+                "SC", "SCN" -> {
+                    resolveCsColor(strokeCs)?.let { strokeColor = it }
+                    strokeModel = strokeCsLabel
+                }
                 "m", "l" -> if (operands.size >= 2) {
                     beginPath(opStart)
                     addPoint(num(0), num(1))
@@ -250,6 +267,37 @@ object ContentStreamEngine {
                 } catch (_: Exception) {
                     null
                 }
+            }
+        }
+
+        // A human label for the color space the fill/stroke was set in, read from
+        // the raw definition so spot colors keep their colorant name even though
+        // pdfbox-android can't build them.
+        private fun describeColorSpace(name: COSName?): String? {
+            if (name == null) return null
+            when (name.name) {
+                "DeviceRGB" -> return "RGB"
+                "DeviceGray" -> return "Gray"
+                "DeviceCMYK" -> return "CMYK"
+                "Pattern" -> return "Pattern"
+            }
+            val def = try {
+                (resources?.cosObject?.getDictionaryObject(COSName.COLORSPACE) as? COSDictionary)
+                    ?.getDictionaryObject(name)
+            } catch (_: Exception) {
+                null
+            }
+            return when (def) {
+                is COSArray -> {
+                    val family = (def.getObject(0) as? COSName)?.name ?: "Color space"
+                    if (family == "Separation" && def.size() > 1) {
+                        (def.getObject(1) as? COSName)?.name?.let { "Separation ($it)" } ?: "Separation"
+                    } else {
+                        family
+                    }
+                }
+                is COSName -> describeColorSpace(def) ?: def.name
+                else -> name.name
             }
         }
 
@@ -364,6 +412,7 @@ object ContentStreamEngine {
                     children = emptyList(),
                     text = runText.toString(),
                     font = currentFont,
+                    colorSpace = fillModel,
                 ),
             )
         }
@@ -387,6 +436,7 @@ object ContentStreamEngine {
                     children = textRuns,
                     text = textFull.toString(),
                     ctm = ctm(),
+                    colorSpace = fillModel,
                 ),
             )
         }
@@ -424,6 +474,7 @@ object ContentStreamEngine {
                         raw = rawSlice(pathStart, endIndex),
                         children = emptyList(),
                         ctm = ctm(),
+                        colorSpace = if (stroked) strokeModel else fillModel,
                     ),
                 )
             }

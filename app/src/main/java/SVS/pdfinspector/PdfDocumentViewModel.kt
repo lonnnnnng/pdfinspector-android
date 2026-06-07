@@ -169,6 +169,7 @@ class PdfDocumentViewModel : ViewModel() {
             fillArgb = if (caps.canFill) state.swatchColors[node.id] ?: node.colorArgb else null,
             strokeArgb = if (caps.canStroke) node.colorArgb else null,
             text = if (caps.canText) node.text else null,
+            colorSpace = node.colorSpace,
         )
     }
 
@@ -440,6 +441,7 @@ class EditTarget(
     val fillArgb: Int?,
     val strokeArgb: Int?,
     val text: String?,
+    val colorSpace: String?,
 )
 
 data class PdfUiState(

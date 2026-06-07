@@ -16,6 +16,16 @@ class ColorSpaceTest {
         val path = ContentStreamEngine.parse(doc.getPage(0))
             .leaves.first { it.kind == NodeKind.PATH }
         assertEquals((0xFF shl 24) or 0xFF0000, path.colorArgb)
+        assertEquals("RGB", path.colorSpace)
+        doc.close()
+    }
+
+    @Test
+    fun cmykFillReportsCmykModel() {
+        val doc = PDDocument.load(scnPdf("0 1 1 0 k\n50 50 200 100 re\nf\n"))
+        val path = ContentStreamEngine.parse(doc.getPage(0))
+            .leaves.first { it.kind == NodeKind.PATH }
+        assertEquals("CMYK", path.colorSpace)
         doc.close()
     }
 

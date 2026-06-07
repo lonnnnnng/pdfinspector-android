@@ -22,6 +22,7 @@ class DrawNode(
     val text: String? = null,
     val ctm: Affine? = null,
     val font: PDFont? = null,
+    val colorSpace: String? = null,
 )
 
 class ParsedPage(
