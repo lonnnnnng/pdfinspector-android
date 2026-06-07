@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.font.PDFont
 import com.tom_roush.pdfbox.rendering.PDFRenderer
 import SVS.pdfinspector.engine.ContentStreamEngine
 import SVS.pdfinspector.engine.DrawNode
@@ -52,6 +53,9 @@ class PdfDocumentViewModel : ViewModel() {
     private var cacheFile: File? = null
     private val renderMutex = Mutex()
 
+    private var fontCatalog: FontCatalog? = null
+    private var embeddedFonts = false
+
     private val undoStack = ArrayDeque<EditSnapshot>()
     private val redoStack = ArrayDeque<EditSnapshot>()
     private var historyBytes = 0L
@@ -73,6 +77,8 @@ class PdfDocumentViewModel : ViewModel() {
                 clearHistory()
                 document = loaded.first
                 cacheFile = loaded.second
+                fontCatalog = FontCatalog(context.applicationContext)
+                embeddedFonts = false
                 openRenderer(loaded.second)
                 renderPage(0)
                 state = state.copy(
@@ -170,6 +176,7 @@ class PdfDocumentViewModel : ViewModel() {
             strokeArgb = if (caps.canStroke) node.colorArgb else null,
             text = if (caps.canText) node.text else null,
             colorSpace = node.colorSpace,
+            fontOptions = if (caps.canText) fontCatalog?.options() ?: emptyList() else emptyList(),
         )
     }
 
@@ -185,8 +192,12 @@ class PdfDocumentViewModel : ViewModel() {
             val result = withContext(Dispatchers.IO) {
                 val page = doc.getPage(pageIndex)
                 val before = ElementEditor.snapshot(page) ?: ByteArray(0)
-                val r = ElementEditor.editElement(doc, page, parsedPage.tokens, node, request)
-                if (r is EditResult.Applied) pushUndo(pageIndex, before)
+                val sub = resolveSubstitute(doc, node, request)
+                val r = ElementEditor.editElement(doc, page, parsedPage.tokens, node, request, sub)
+                if (r is EditResult.Applied) {
+                    pushUndo(pageIndex, before)
+                    if (sub != null) embeddedFonts = true
+                }
                 r
             }
             when (result) {
@@ -210,6 +221,30 @@ class PdfDocumentViewModel : ViewModel() {
                 EditResult.Degenerate ->
                     Toast.makeText(context, "Cannot transform this element", Toast.LENGTH_SHORT).show()
                 EditResult.NoChange -> state = state.copy(editingId = null)
+            }
+        }
+    }
+
+    private fun resolveSubstitute(doc: PDDocument, node: DrawNode, request: EditRequest): PDFont? {
+        val id = request.fontEntryId ?: return null
+        val cat = fontCatalog ?: return null
+        val realId = if (id == AUTO_FONT_ID) cat.autoMatchId(node.font) else id
+        return realId?.let { cat.resolve(doc, it) }
+    }
+
+    fun importFont(context: Context, uri: Uri) {
+        val cat = fontCatalog
+        if (cat == null) {
+            Toast.makeText(context, "Open a document first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) { cat.importFont(uri) }
+            if (ok) {
+                state = state.copy(fontCatalogTick = state.fontCatalogTick + 1)
+                Toast.makeText(context, "Font added", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Could not import that font", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -290,6 +325,8 @@ class PdfDocumentViewModel : ViewModel() {
         clearHistory()
         runCatching { cacheFile?.delete() }
         cacheFile = null
+        fontCatalog = null
+        embeddedFonts = false
         state = PdfUiState()
     }
 
@@ -393,7 +430,8 @@ class PdfDocumentViewModel : ViewModel() {
     // After an in-memory edit the cache file is stale; rewrite it and reopen
     // pdfium on the fresh bytes. saveIncremental appends only the changed objects
     // to the original, so editing one page skips re-serializing the whole doc.
-    // Falls back to a full save if the doc has no retained source.
+    // Once a font is embedded the increment can't reach the new font objects
+    // (commit only flags the page chain), so switch to full saves from then on.
     private suspend fun resyncCacheAndReopen() {
         val doc = document ?: return
         val file = cacheFile ?: return
@@ -401,7 +439,11 @@ class PdfDocumentViewModel : ViewModel() {
             closeRenderer()
             withContext(Dispatchers.IO) {
                 try {
-                    file.outputStream().use { doc.saveIncremental(it) }
+                    if (embeddedFonts) {
+                        file.outputStream().use { doc.save(it) }
+                    } else {
+                        file.outputStream().use { doc.saveIncremental(it) }
+                    }
                 } catch (t: Throwable) {
                     Log.w(TAG, "incremental save failed, full save", t)
                     file.outputStream().use { doc.save(it) }
@@ -448,6 +490,7 @@ class EditTarget(
     val strokeArgb: Int?,
     val text: String?,
     val colorSpace: String?,
+    val fontOptions: List<FontOption> = emptyList(),
 )
 
 data class PdfUiState(
@@ -471,5 +514,6 @@ data class PdfUiState(
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
     val documentToken: Int = 0,
+    val fontCatalogTick: Int = 0,
     val error: String? = null,
 )

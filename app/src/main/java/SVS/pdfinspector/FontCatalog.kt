@@ -12,6 +12,8 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
 
+const val AUTO_FONT_ID = "auto"
+
 enum class FontSource { BUNDLED, SYSTEM, CUSTOM }
 
 class FontOption(
