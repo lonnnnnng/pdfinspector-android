@@ -26,6 +26,7 @@ import SVS.pdfinspector.engine.EditCaps
 import SVS.pdfinspector.engine.EditRequest
 import SVS.pdfinspector.engine.EditResult
 import SVS.pdfinspector.engine.ElementEditor
+import SVS.pdfinspector.engine.NodeKind
 import SVS.pdfinspector.engine.ParsedPage
 import SVS.pdfinspector.engine.collectGroupIds
 import SVS.pdfinspector.engine.findNode
@@ -165,7 +166,7 @@ class PdfDocumentViewModel : ViewModel() {
             y = b?.minY ?: 0f,
             w = b?.width ?: 0f,
             h = b?.height ?: 0f,
-            fillArgb = if (caps.canFill) node.colorArgb else null,
+            fillArgb = if (caps.canFill) state.swatchColors[node.id] ?: node.colorArgb else null,
             strokeArgb = if (caps.canStroke) node.colorArgb else null,
             text = if (caps.canText) node.text else null,
         )
@@ -311,6 +312,7 @@ class PdfDocumentViewModel : ViewModel() {
                 elementCount = result.second.leaves.size,
                 page = result.second,
                 pageTransform = result.third,
+                swatchColors = sampleLeafColors(result.first, result.second.leaves, result.third),
                 selectedId = null,
                 expanded = collectGroupIds(result.second.root),
             )
@@ -318,6 +320,30 @@ class PdfDocumentViewModel : ViewModel() {
             Log.e(TAG, "render failed page=$index", t)
             state = state.copy(error = t.message ?: "Failed to render page")
         }
+    }
+
+    // pdfbox-android can't resolve some color spaces (Separation, etc.), so the
+    // true paint color is read from the pixel pdfium actually drew at the
+    // element's center. Text keeps its parsed color (glyph centers are usually
+    // background).
+    private fun sampleLeafColors(
+        bmp: Bitmap,
+        leaves: List<DrawNode>,
+        t: PageTransform,
+    ): Map<Int, Int> {
+        val map = HashMap<Int, Int>()
+        val w = bmp.width
+        val h = bmp.height
+        for (leaf in leaves) {
+            if (leaf.kind != NodeKind.PATH && leaf.kind != NodeKind.IMAGE) continue
+            val b = leaf.bounds ?: continue
+            val r = t.toRect(b)
+            val cx = ((r.left + r.right) * 0.5f).toInt().coerceIn(0, w - 1)
+            val cy = ((r.top + r.bottom) * 0.5f).toInt().coerceIn(0, h - 1)
+            val px = bmp.getPixel(cx, cy)
+            if (px ushr 24 != 0) map[leaf.id] = px or (0xFF shl 24)
+        }
+        return map
     }
 
     private suspend fun renderPageBitmap(index: Int, pxW: Int, pxH: Int): Bitmap =
@@ -429,6 +455,7 @@ data class PdfUiState(
     val pageTransform: PageTransform? = null,
     val selectedId: Int? = null,
     val editingId: Int? = null,
+    val swatchColors: Map<Int, Int> = emptyMap(),
     val revealTick: Int = 0,
     val expanded: Set<Int> = emptySet(),
     val showRaw: Boolean = false,

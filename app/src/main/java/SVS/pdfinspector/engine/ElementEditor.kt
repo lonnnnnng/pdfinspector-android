@@ -91,12 +91,14 @@ object ElementEditor {
             paint.startsWith("B") || paint.startsWith("b"))
         val pathStroke = path && (paint == "S" || paint == "s" ||
             paint.startsWith("B") || paint.startsWith("b"))
-        // Only offer color where a color token is actually exposed on the node.
+        // A filled/stroked path always has a paint color (sampled from the page
+        // when its color space is unresolved). Text only exposes a color when one
+        // was set, so gate text color on that.
         val hasColor = node.colorArgb != null
         return EditCaps(
             canGeom = canGeom,
-            canFill = (pathFill || textObject || textRun) && hasColor,
-            canStroke = pathStroke && hasColor,
+            canFill = pathFill || ((textObject || textRun) && hasColor),
+            canStroke = pathStroke,
             canText = textRun,
         )
     }

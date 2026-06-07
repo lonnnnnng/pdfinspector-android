@@ -302,6 +302,7 @@ private fun Workspace(
             page = page,
             expanded = state.expanded,
             selectedId = state.selectedId,
+            swatchColors = state.swatchColors,
             revealTick = state.revealTick,
             showRaw = state.showRaw,
             canDelete = state.selectedId != null,

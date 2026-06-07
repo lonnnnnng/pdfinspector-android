@@ -11,6 +11,7 @@ import com.tom_roush.pdfbox.pdfparser.PDFStreamParser
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDResources
 import com.tom_roush.pdfbox.pdmodel.font.PDFont
+import com.tom_roush.pdfbox.pdmodel.graphics.color.PDColorSpace
 import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import java.io.ByteArrayInputStream
@@ -61,6 +62,9 @@ object ContentStreamEngine {
 
         private var fillColor: Int? = null
         private var strokeColor: Int? = null
+        private var fillCs: PDColorSpace? = null
+        private var strokeCs: PDColorSpace? = null
+        private val csCache = HashMap<String, PDColorSpace?>()
 
         private class GroupFrame(val openIndex: Int, val children: MutableList<DrawNode> = ArrayList())
 
@@ -173,6 +177,10 @@ object ContentStreamEngine {
                 "G" -> strokeColor = rgb(num(0), num(0), num(0))
                 "k" -> fillColor = cmyk(num(0), num(1), num(2), num(3))
                 "K" -> strokeColor = cmyk(num(0), num(1), num(2), num(3))
+                "cs" -> fillCs = colorSpace(operands.lastOrNull() as? COSName)
+                "CS" -> strokeCs = colorSpace(operands.lastOrNull() as? COSName)
+                "sc", "scn" -> resolveCsColor(fillCs)?.let { fillColor = it }
+                "SC", "SCN" -> resolveCsColor(strokeCs)?.let { strokeColor = it }
                 "m", "l" -> if (operands.size >= 2) {
                     beginPath(opStart)
                     addPoint(num(0), num(1))
@@ -233,6 +241,35 @@ object ContentStreamEngine {
                     null
                 }
             }
+
+        private fun colorSpace(name: COSName?): PDColorSpace? {
+            if (name == null) return null
+            return csCache.getOrPut(name.name) {
+                try {
+                    resources?.getColorSpace(name)
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+
+        // Resolves an sc/scn color through its color space to RGB. The component
+        // count must match: pdfbox-android falls back to DeviceRGB for color
+        // spaces it cannot build (e.g. Separation), and feeding it the wrong
+        // operand count yields garbage, so skip those and let bitmap sampling
+        // supply the real color instead.
+        private fun resolveCsColor(cs: PDColorSpace?): Int? {
+            if (cs == null) return null
+            val comps = ArrayList<Float>(operands.size)
+            for (o in operands) if (o is COSNumber) comps.add(o.floatValue())
+            if (comps.isEmpty() || comps.size != cs.numberOfComponents) return null
+            return try {
+                val c = cs.toRGB(comps.toFloatArray())
+                rgb(c[0], c[1], c[2])
+            } catch (_: Exception) {
+                null
+            }
+        }
 
         private fun showText(s: COSString?) {
             if (s == null) return

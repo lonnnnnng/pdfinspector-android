@@ -55,6 +55,7 @@ fun InspectorPane(
     page: ParsedPage,
     expanded: Set<Int>,
     selectedId: Int?,
+    swatchColors: Map<Int, Int>,
     revealTick: Int,
     showRaw: Boolean,
     canDelete: Boolean,
@@ -129,7 +130,8 @@ fun InspectorPane(
         }
         LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
             items(rows, key = { it.node.id }) { row ->
-                TreeRowItem(row, row.node.id == selectedId, showRaw, onSelect, onToggleExpand, onEdit)
+                val swatch = swatchColors[row.node.id] ?: row.node.colorArgb
+                TreeRowItem(row, row.node.id == selectedId, showRaw, swatch, onSelect, onToggleExpand, onEdit)
             }
         }
     }
@@ -154,6 +156,7 @@ private fun TreeRowItem(
     row: TreeRow,
     selected: Boolean,
     showRaw: Boolean,
+    swatchColor: Int?,
     onSelect: (Int) -> Unit,
     onToggleExpand: (Int) -> Unit,
     onEdit: (Int) -> Unit,
@@ -202,7 +205,7 @@ private fun TreeRowItem(
                 )
             }
         }
-        node.colorArgb?.let { argb ->
+        swatchColor?.let { argb ->
             Spacer(Modifier.width(8.dp))
             Box(
                 Modifier
