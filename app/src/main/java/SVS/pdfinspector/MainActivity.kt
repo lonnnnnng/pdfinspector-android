@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -296,6 +297,7 @@ private fun Workspace(
         if (bmp != null) {
             PdfCanvas(
                 bitmap = bmp,
+                pageIndex = state.pageIndex,
                 scaleState = scaleState,
                 offsetState = offsetState,
                 leaves = leafRects,
@@ -305,6 +307,10 @@ private fun Workspace(
                 fitMode = fitMode,
                 onUserTransform = onUserTransform,
                 onSelect = { id -> viewModel.select(id, reveal = true) },
+                renderTile = { idx, src, outW, outH ->
+                    viewModel.renderRegion(idx, src.left, src.top, src.right, src.bottom, outW, outH)
+                        ?.asImageBitmap()
+                },
                 modifier = mod,
             )
         } else {
