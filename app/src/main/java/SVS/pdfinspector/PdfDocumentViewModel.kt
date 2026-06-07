@@ -198,9 +198,15 @@ class PdfDocumentViewModel : ViewModel() {
                         busy = null, dirty = true, canUndo = true, canRedo = false,
                     )
                 }
-                EditResult.TextEncodeFailed -> Toast.makeText(
-                    context, "Could not encode that text in this font", Toast.LENGTH_SHORT,
-                ).show()
+                is EditResult.TextEncodeFailed -> {
+                    val chars = result.chars
+                    val msg = if (chars.isNullOrBlank()) {
+                        "This font cannot encode that text"
+                    } else {
+                        "This font lacks: $chars"
+                    }
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                }
                 EditResult.Degenerate ->
                     Toast.makeText(context, "Cannot transform this element", Toast.LENGTH_SHORT).show()
                 EditResult.NoChange -> state = state.copy(editingId = null)

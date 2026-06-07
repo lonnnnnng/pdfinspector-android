@@ -11,7 +11,9 @@ import com.tom_roush.pdfbox.cos.COSString
 import com.tom_roush.pdfbox.pdfwriter.ContentStreamWriter
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.PDResources
 import com.tom_roush.pdfbox.pdmodel.common.PDStream
+import com.tom_roush.pdfbox.pdmodel.font.PDFont
 import java.io.IOException
 
 // Page-space edit for one element: translate by dx,dy, scale by scaleX,scaleY
@@ -24,6 +26,7 @@ class EditRequest(
     val fillArgb: Int? = null,
     val strokeArgb: Int? = null,
     val newText: String? = null,
+    val fontEntryId: String? = null,
 )
 
 // What the edit form may offer for a given node.
@@ -38,7 +41,7 @@ sealed class EditResult {
     class Applied(val tokens: List<Any>) : EditResult()
     object NoChange : EditResult()
     object Degenerate : EditResult()
-    object TextEncodeFailed : EditResult()
+    class TextEncodeFailed(val chars: String? = null) : EditResult()
 }
 
 object ElementEditor {
@@ -109,16 +112,23 @@ object ElementEditor {
         tokens: List<Any>,
         node: DrawNode,
         request: EditRequest,
+        substituteFont: PDFont? = null,
     ): EditResult {
-        val result = rebuild(tokens, node, request)
+        val result = rebuild(tokens, node, request, page, substituteFont)
         if (result is EditResult.Applied) writeStream(document, page, result.tokens)
         return result
     }
 
-    private fun rebuild(tokens: List<Any>, node: DrawNode, request: EditRequest): EditResult {
+    private fun rebuild(
+        tokens: List<Any>,
+        node: DrawNode,
+        request: EditRequest,
+        page: PDPage,
+        substituteFont: PDFont?,
+    ): EditResult {
         val textObject = node.kind == NodeKind.TEXT && isOp(tokens.getOrNull(node.startIndex), "BT")
         val textRun = node.kind == NodeKind.TEXT && !textObject
-        if (textRun) return rebuildTextRun(tokens, node, request)
+        if (textRun) return rebuildTextRun(tokens, node, request, page, substituteFont)
 
         val wrappable = node.kind == NodeKind.PATH || node.kind == NodeKind.IMAGE || textObject
         val wantsGeom = request.dx != 0f || request.dy != 0f ||
@@ -165,34 +175,86 @@ object ElementEditor {
         return EditResult.Applied(out)
     }
 
-    private fun rebuildTextRun(tokens: List<Any>, node: DrawNode, request: EditRequest): EditResult {
+    // Rewrites one show-text run. When substituteFont is given the run is
+    // re-encoded with it: a Tf selecting the new resource is emitted before the
+    // run and the original Tf restated after, since q/Q cannot wrap text.
+    private fun rebuildTextRun(
+        tokens: List<Any>,
+        node: DrawNode,
+        request: EditRequest,
+        page: PDPage,
+        substituteFont: PDFont?,
+    ): EditResult {
         val wantsColor = request.fillArgb != null
         val newText = request.newText
         if (!wantsColor && newText == null) return EditResult.NoChange
 
-        val out = ArrayList<Any>(tokens.size + 4)
+        val out = ArrayList<Any>(tokens.size + 8)
         out.addAll(tokens.subList(0, node.startIndex))
         request.fillArgb?.let { appendColor(out, it, false) }
         if (newText != null) {
-            val font = node.font ?: return EditResult.TextEncodeFailed
+            val font = substituteFont ?: node.font ?: return EditResult.TextEncodeFailed()
             val bytes = try {
                 font.encode(newText)
-            } catch (_: IOException) {
-                return EditResult.TextEncodeFailed
-            } catch (_: IllegalArgumentException) {
-                return EditResult.TextEncodeFailed
             } catch (_: Exception) {
-                return EditResult.TextEncodeFailed
+                return EditResult.TextEncodeFailed(unsupportedChars(font, newText))
+            }
+            val newName = if (substituteFont != null) {
+                val res = page.resources ?: return EditResult.TextEncodeFailed()
+                ensureFontResource(res, substituteFont)
+            } else {
+                null
+            }
+            if (newName != null) {
+                out.add(newName)
+                out.add(COSFloat(node.fontSize))
+                out.add(Operator.getOperator("Tf"))
             }
             for (i in node.startIndex until node.endIndex - 1) out.add(tokens[i])
             out.add(COSString(bytes))
             val opName = (tokens[node.endIndex] as? Operator)?.name
             out.add(if (opName == "TJ") Operator.getOperator("Tj") else tokens[node.endIndex])
+            if (newName != null && !node.fontResourceName.isNullOrBlank()) {
+                out.add(COSName.getPDFName(node.fontResourceName))
+                out.add(COSFloat(node.fontSize))
+                out.add(Operator.getOperator("Tf"))
+            }
         } else {
             out.addAll(tokens.subList(node.startIndex, node.endIndex + 1))
         }
         out.addAll(tokens.subList(node.endIndex + 1, tokens.size))
         return EditResult.Applied(out)
+    }
+
+    // Reuses an already-added resource when the same font is applied to several
+    // runs, so repeated edits don't pile up duplicate /Font entries.
+    private fun ensureFontResource(resources: PDResources, font: PDFont): COSName {
+        for (name in resources.fontNames) {
+            val existing = try {
+                resources.getFont(name)
+            } catch (_: Exception) {
+                null
+            }
+            if (existing != null && existing.cosObject === font.cosObject) return name
+        }
+        return resources.add(font)
+    }
+
+    // The distinct characters the font cannot encode, for a useful message.
+    private fun unsupportedChars(font: PDFont, text: String): String {
+        val bad = LinkedHashSet<String>()
+        var i = 0
+        while (i < text.length) {
+            val cp = text.codePointAt(i)
+            val s = String(Character.toChars(cp))
+            try {
+                font.encode(s)
+            } catch (_: Exception) {
+                if (s.isNotBlank()) bad.add(s)
+            }
+            i += Character.charCount(cp)
+        }
+        return bad.joinToString(" ")
     }
 
     private fun appendColor(out: MutableList<Any>, argb: Int, stroke: Boolean) {
