@@ -95,9 +95,9 @@ class PdfDocumentViewModel : ViewModel() {
         val doc = document ?: return
         if (index < 0 || index >= doc.numberOfPages || index == state.pageIndex) return
         viewModelScope.launch {
-            state = state.copy(loading = true)
+            state = state.copy(busy = "Loading page")
             renderPage(index)
-            state = state.copy(loading = false, pageIndex = index)
+            state = state.copy(busy = null, pageIndex = index)
         }
     }
 
@@ -131,7 +131,7 @@ class PdfDocumentViewModel : ViewModel() {
         val node = findNode(parsedPage.root, state.selectedId) ?: return
         val pageIndex = state.pageIndex
         viewModelScope.launch {
-            state = state.copy(loading = true)
+            state = state.copy(busy = "Deleting")
             withContext(Dispatchers.IO) {
                 recordUndo(doc, pageIndex)
                 ElementEditor.deleteRange(
@@ -141,7 +141,7 @@ class PdfDocumentViewModel : ViewModel() {
             }
             resyncCacheAndReopen()
             renderPage(pageIndex)
-            state = state.copy(loading = false, dirty = true, canUndo = true, canRedo = false)
+            state = state.copy(busy = null, dirty = true, canUndo = true, canRedo = false)
         }
     }
 
@@ -177,7 +177,9 @@ class PdfDocumentViewModel : ViewModel() {
         val node = findNode(parsedPage.root, state.editingId) ?: return
         val pageIndex = state.pageIndex
         viewModelScope.launch {
-            state = state.copy(loading = true)
+            // editElement is cheap and may reject; do it first so a failed edit
+            // keeps the sheet open with the user's input. Only the slow resync +
+            // render is overlaid, and the sheet closes the instant it starts.
             val result = withContext(Dispatchers.IO) {
                 val page = doc.getPage(pageIndex)
                 val before = ElementEditor.snapshot(page) ?: ByteArray(0)
@@ -187,24 +189,19 @@ class PdfDocumentViewModel : ViewModel() {
             }
             when (result) {
                 is EditResult.Applied -> {
+                    state = state.copy(editingId = null, busy = "Applying edits")
                     resyncCacheAndReopen()
                     renderPage(pageIndex)
                     state = state.copy(
-                        loading = false, dirty = true,
-                        canUndo = true, canRedo = false, editingId = null,
+                        busy = null, dirty = true, canUndo = true, canRedo = false,
                     )
                 }
-                EditResult.TextEncodeFailed -> {
-                    state = state.copy(loading = false)
-                    Toast.makeText(
-                        context, "Could not encode that text in this font", Toast.LENGTH_SHORT,
-                    ).show()
-                }
-                EditResult.Degenerate -> {
-                    state = state.copy(loading = false)
+                EditResult.TextEncodeFailed -> Toast.makeText(
+                    context, "Could not encode that text in this font", Toast.LENGTH_SHORT,
+                ).show()
+                EditResult.Degenerate ->
                     Toast.makeText(context, "Cannot transform this element", Toast.LENGTH_SHORT).show()
-                }
-                EditResult.NoChange -> state = state.copy(loading = false, editingId = null)
+                EditResult.NoChange -> state = state.copy(editingId = null)
             }
         }
     }
@@ -217,7 +214,7 @@ class PdfDocumentViewModel : ViewModel() {
         val doc = document ?: return
         if (from.isEmpty()) return
         viewModelScope.launch {
-            state = state.copy(loading = true)
+            state = state.copy(busy = "Working")
             val entry = from.removeLast()
             historyBytes -= entry.content.size
             val pageIndex = entry.pageIndex
@@ -231,7 +228,7 @@ class PdfDocumentViewModel : ViewModel() {
             resyncCacheAndReopen()
             renderPage(pageIndex)
             state = state.copy(
-                loading = false,
+                busy = null,
                 pageIndex = pageIndex,
                 dirty = true,
                 canUndo = undoStack.isNotEmpty(),
@@ -412,6 +409,7 @@ class EditTarget(
 
 data class PdfUiState(
     val loading: Boolean = false,
+    val busy: String? = null,
     val hasDocument: Boolean = false,
     val bitmap: ImageBitmap? = null,
     val pageIndex: Int = 0,
