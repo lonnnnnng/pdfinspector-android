@@ -103,15 +103,17 @@ fun InspectorToolbar(
                     }
                 }
 
-                FitMenuButton(onFitWidth = onFitWidth, onFitHeight = onFitHeight)
-                IconButton(onClick = onToggleFullscreen) {
-                    Icon(
-                        imageVector = if (fullscreen) TablerIcons.Minimize else TablerIcons.Maximize,
-                        contentDescription = "Toggle full screen",
-                        modifier = Modifier.size(20.dp),
-                        tint = if (fullscreen) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                IconButton(
+                    onClick = onSave,
+                    enabled = dirty,
+                    colors = IconButtonDefaults.iconButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary,
+                    ),
+                ) {
+                    Icon(TablerIcons.DeviceFloppy, "Save a copy", Modifier.size(20.dp))
+                }
+                IconButton(onClick = onOpen) {
+                    Icon(TablerIcons.Folder, "Open a PDF", Modifier.size(20.dp))
                 }
 
                 ToolDivider()
@@ -132,18 +134,16 @@ fun InspectorToolbar(
                 }
 
                 ToolDivider()
-                IconButton(onClick = onOpen) {
-                    Icon(TablerIcons.Folder, "Open a PDF", Modifier.size(20.dp))
+                IconButton(onClick = onToggleFullscreen) {
+                    Icon(
+                        imageVector = if (fullscreen) TablerIcons.Minimize else TablerIcons.Maximize,
+                        contentDescription = "Toggle full screen",
+                        modifier = Modifier.size(20.dp),
+                        tint = if (fullscreen) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                IconButton(
-                    onClick = onSave,
-                    enabled = dirty,
-                    colors = IconButtonDefaults.iconButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary,
-                    ),
-                ) {
-                    Icon(TablerIcons.DeviceFloppy, "Save a copy", Modifier.size(20.dp))
-                }
+                FitMenuButton(onFitWidth = onFitWidth, onFitHeight = onFitHeight)
                 IconButton(onClick = onSettings) {
                     Icon(TablerIcons.Settings, "Settings", Modifier.size(20.dp))
                 }
