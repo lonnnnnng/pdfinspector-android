@@ -200,7 +200,7 @@ object ElementEditor {
                 return EditResult.TextEncodeFailed(unsupportedChars(font, newText))
             }
             val newName = if (substituteFont != null) {
-                val res = page.resources ?: return EditResult.TextEncodeFailed()
+                val res = page.resources ?: PDResources().also { page.resources = it }
                 ensureFontResource(res, substituteFont)
             } else {
                 null

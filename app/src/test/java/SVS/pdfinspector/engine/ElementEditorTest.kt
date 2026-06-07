@@ -6,6 +6,7 @@ import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.cos.COSString
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -166,6 +167,36 @@ class ElementEditorTest {
         val doc = PDDocument()
         val result = ElementEditor.editElement(doc, PDPage(), tokens, node, EditRequest(newText = "x"))
         assertTrue("missing font should be rejected", result is EditResult.TextEncodeFailed)
+        doc.close()
+    }
+
+    @Test
+    fun textEditSubstitutesFontAndRestoresOriginal() {
+        val tokens = listOf<Any>(
+            COSName.getPDFName("F1"), COSFloat(12f), Operator.getOperator("Tf"),
+            COSString("Hi".toByteArray(Charsets.ISO_8859_1)), Operator.getOperator("Tj"),
+        )
+        val run = DrawNode(
+            id = 1, kind = NodeKind.TEXT, label = "Text", detail = "",
+            startIndex = 3, endIndex = 4, bounds = null, colorArgb = null,
+            raw = "", children = emptyList(), text = "Hi",
+            fontResourceName = "F1", fontSize = 12f,
+        )
+        val doc = PDDocument()
+        val page = PDPage()
+        doc.addPage(page)
+
+        val result = ElementEditor.editElement(
+            doc, page, tokens, run, EditRequest(newText = "Hello"), PDType1Font.HELVETICA,
+        )
+        assertTrue("substitution should apply", result is EditResult.Applied)
+        val out = (result as EditResult.Applied).tokens
+        val tfAt = out.indices.filter { (out[it] as? Operator)?.name == "Tf" }
+        assertEquals("original Tf plus switch and restore", 3, tfAt.size)
+        assertEquals("original font restored after run", "F1", (out[tfAt[2] - 2] as COSName).name)
+        val added = out[tfAt[1] - 2] as COSName
+        assertTrue("substitute font added to resources", page.resources.getFont(added) != null)
+        assertTrue("run still shows text", out.any { (it as? Operator)?.name == "Tj" })
         doc.close()
     }
 

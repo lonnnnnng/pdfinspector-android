@@ -1,6 +1,7 @@
 package SVS.pdfinspector.engine
 
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -43,6 +44,17 @@ class ContentStreamEngineTest {
         assertTrue("deleted text should be gone after re-parse", !stillThere)
         assertTrue("the path should survive", reparsed.leaves.any { it.kind == NodeKind.PATH })
 
+        doc.close()
+    }
+
+    @Test
+    fun textRunCarriesFontResourceAndSize() {
+        val doc = PDDocument.load(samplePdf())
+        val parsed = ContentStreamEngine.parse(doc.getPage(0))
+        val textObj = parsed.leaves.first { it.kind == NodeKind.TEXT }
+        val run = textObj.children.first { it.kind == NodeKind.TEXT }
+        assertEquals("F1", run.fontResourceName)
+        assertEquals(24f, run.fontSize, 1e-4f)
         doc.close()
     }
 
