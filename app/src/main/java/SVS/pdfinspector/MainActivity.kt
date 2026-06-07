@@ -157,6 +157,7 @@ fun InspectorScreen(
     }
 
     BackHandler(enabled = state.hasDocument) {
+        if (state.busy != null) return@BackHandler
         fullscreen = false
         viewModel.closeDocument()
     }
@@ -167,53 +168,55 @@ fun InspectorScreen(
         ?.text
 
     if (state.hasDocument) {
-        Scaffold(
-            topBar = {
-                InspectorToolbar(
-                    fileName = state.fileName,
-                    fullscreen = fullscreen,
-                    pageIndex = state.pageIndex,
-                    pageCount = state.pageCount,
-                    dirty = state.dirty,
-                    canUndo = state.canUndo,
-                    canRedo = state.canRedo,
-                    copyText = copyText,
-                    onCopyText = { viewModel.copySelectedText(context) },
-                    onFitWidth = { fitMode = FitMode.WIDTH },
-                    onFitHeight = { fitMode = FitMode.HEIGHT },
-                    onToggleFullscreen = { fullscreen = !fullscreen },
-                    onPrev = { viewModel.showPage(state.pageIndex - 1) },
-                    onNext = { viewModel.showPage(state.pageIndex + 1) },
-                    onUndo = { viewModel.undo() },
-                    onRedo = { viewModel.redo() },
-                    onOpen = { pickPdf() },
-                    onSave = { saveLauncher.launch("inspected.pdf") },
-                    onSettings = { showSettings = true },
-                )
-            },
-        ) { inner ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(inner),
-            ) {
-                Workspace(
-                    viewModel = viewModel,
-                    state = state,
-                    dock = dock,
-                    transparent = transparent,
-                    sizeDp = sizeDp,
-                    onResize = onResize,
-                    fitMode = fitMode,
-                    onUserTransform = { fitMode = FitMode.NONE },
-                    onToggleDock = { dock = if (dock == Dock.BOTTOM) Dock.SIDE else Dock.BOTTOM },
-                    onToggleTransparent = {
-                        transparent = !transparent
-                        fitMode = FitMode.NONE
-                    },
-                )
-                state.busy?.let { BusyOverlay(it) }
+        Box(Modifier.fillMaxSize()) {
+            Scaffold(
+                topBar = {
+                    InspectorToolbar(
+                        fileName = state.fileName,
+                        fullscreen = fullscreen,
+                        pageIndex = state.pageIndex,
+                        pageCount = state.pageCount,
+                        dirty = state.dirty,
+                        canUndo = state.canUndo,
+                        canRedo = state.canRedo,
+                        copyText = copyText,
+                        onCopyText = { viewModel.copySelectedText(context) },
+                        onFitWidth = { fitMode = FitMode.WIDTH },
+                        onFitHeight = { fitMode = FitMode.HEIGHT },
+                        onToggleFullscreen = { fullscreen = !fullscreen },
+                        onPrev = { viewModel.showPage(state.pageIndex - 1) },
+                        onNext = { viewModel.showPage(state.pageIndex + 1) },
+                        onUndo = { viewModel.undo() },
+                        onRedo = { viewModel.redo() },
+                        onOpen = { pickPdf() },
+                        onSave = { saveLauncher.launch("inspected.pdf") },
+                        onSettings = { showSettings = true },
+                    )
+                },
+            ) { inner ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(inner),
+                ) {
+                    Workspace(
+                        viewModel = viewModel,
+                        state = state,
+                        dock = dock,
+                        transparent = transparent,
+                        sizeDp = sizeDp,
+                        onResize = onResize,
+                        fitMode = fitMode,
+                        onUserTransform = { fitMode = FitMode.NONE },
+                        onToggleDock = { dock = if (dock == Dock.BOTTOM) Dock.SIDE else Dock.BOTTOM },
+                        onToggleTransparent = {
+                            transparent = !transparent
+                            fitMode = FitMode.NONE
+                        },
+                    )
+                }
             }
+            state.busy?.let { BusyOverlay(it) }
         }
     } else {
         Box(Modifier.fillMaxSize()) {

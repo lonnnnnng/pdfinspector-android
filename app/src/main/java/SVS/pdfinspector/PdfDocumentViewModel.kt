@@ -306,6 +306,7 @@ class PdfDocumentViewModel : ViewModel() {
     fun saveCopy(context: Context, uri: Uri) {
         val doc = document ?: return
         viewModelScope.launch {
+            state = state.copy(busy = "Saving")
             try {
                 withContext(Dispatchers.IO) {
                     context.contentResolver.openOutputStream(uri)?.use { doc.save(it) }
@@ -313,7 +314,10 @@ class PdfDocumentViewModel : ViewModel() {
                 state = state.copy(dirty = false)
                 Toast.makeText(context, "Saved a copy", Toast.LENGTH_SHORT).show()
             } catch (t: Throwable) {
-                state = state.copy(error = t.message ?: "Failed to save")
+                Log.e(TAG, "save failed", t)
+                Toast.makeText(context, "Failed to save", Toast.LENGTH_LONG).show()
+            } finally {
+                state = state.copy(busy = null)
             }
         }
     }
