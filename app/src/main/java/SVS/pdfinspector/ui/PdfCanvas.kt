@@ -7,8 +7,8 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -31,6 +31,8 @@ private const val MAX_SCALE = 12f
 @Composable
 fun PdfCanvas(
     bitmap: ImageBitmap,
+    scaleState: MutableState<Float>,
+    offsetState: MutableState<Offset>,
     leaves: List<LeafRect>,
     selectedRect: Rect?,
     highlightColor: Color,
@@ -44,8 +46,10 @@ fun PdfCanvas(
         val viewportW = constraints.maxWidth.toFloat()
         val viewportH = constraints.maxHeight.toFloat()
 
-        var scale by remember { mutableFloatStateOf(1f) }
-        var offset by remember { mutableStateOf(Offset.Zero) }
+        // Hoisted by the caller so zoom/pan survive the canvas moving between the
+        // docked and transparent layout branches.
+        var scale by scaleState
+        var offset by offsetState
 
         var showDebug by remember { mutableStateOf(false) }
         var mem by remember { mutableStateOf(MemStats(0, 0, 0)) }

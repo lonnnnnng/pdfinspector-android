@@ -44,6 +44,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -283,10 +284,17 @@ private fun Workspace(
     val backdrop = MaterialTheme.colorScheme.surfaceVariant
     val bmp = state.bitmap
 
+    // Held here, not inside PdfCanvas, so zoom/pan persist when the canvas moves
+    // between the docked and transparent layouts.
+    val scaleState = remember { mutableStateOf(1f) }
+    val offsetState = remember { mutableStateOf(Offset.Zero) }
+
     val canvas: @Composable (Modifier) -> Unit = { mod ->
         if (bmp != null) {
             PdfCanvas(
                 bitmap = bmp,
+                scaleState = scaleState,
+                offsetState = offsetState,
                 leaves = leafRects,
                 selectedRect = selectedRect,
                 highlightColor = highlight,
