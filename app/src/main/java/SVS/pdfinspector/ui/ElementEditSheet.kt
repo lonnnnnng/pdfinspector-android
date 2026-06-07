@@ -1,5 +1,8 @@
 package SVS.pdfinspector.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -7,8 +10,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -24,7 +32,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import SVS.pdfinspector.AUTO_FONT_ID
 import SVS.pdfinspector.EditTarget
+import SVS.pdfinspector.FontOption
+import SVS.pdfinspector.FontSource
 import SVS.pdfinspector.engine.EditRequest
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -32,6 +43,7 @@ import SVS.pdfinspector.engine.EditRequest
 fun ElementEditSheet(
     target: EditTarget,
     onApply: (EditRequest) -> Unit,
+    onImportFont: (Uri) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val caps = target.caps
@@ -43,6 +55,11 @@ fun ElementEditSheet(
     var fill by remember(id) { mutableStateOf(target.fillArgb?.let(::argbToHex) ?: "") }
     var stroke by remember(id) { mutableStateOf(target.strokeArgb?.let(::argbToHex) ?: "") }
     var text by remember(id) { mutableStateOf(target.text ?: "") }
+    var fontId by remember(id) { mutableStateOf<String?>(null) }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri: Uri? -> if (uri != null) onImportFont(uri) }
 
     val sheetState = rememberModalBottomSheetState()
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -117,11 +134,17 @@ fun ElementEditSheet(
                     label = { Text("Text") },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                FontPicker(
+                    options = target.fontOptions,
+                    selectedId = fontId,
+                    onSelect = { fontId = it },
+                    onAddCustom = { importLauncher.launch("*/*") },
+                )
                 Text(
-                    "Experimental: text is re-encoded with the element's font. " +
-                        "Characters the font lacks will fail and the edit is skipped.",
+                    "Text is re-encoded with the chosen font. Keep the original " +
+                        "when it has the characters, or pick a fallback if it does not.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
@@ -132,7 +155,7 @@ fun ElementEditSheet(
                 TextButton(onClick = onDismiss) { Text("Cancel") }
                 Button(onClick = {
                     onApply(
-                        buildRequest(target, x, y, w, h, fill, stroke, text),
+                        buildRequest(target, x, y, w, h, fill, stroke, text, fontId),
                     )
                 }) { Text("Apply") }
             }
@@ -157,6 +180,61 @@ private fun NumberField(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FontPicker(
+    options: List<FontOption>,
+    selectedId: String?,
+    onSelect: (String?) -> Unit,
+    onAddCustom: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val label = when (selectedId) {
+        null -> "Keep original font"
+        AUTO_FONT_ID -> "Auto (match original)"
+        else -> options.firstOrNull { it.id == selectedId }?.let(::fontLabel) ?: "Keep original font"
+    }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = label,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Font") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth(),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("Keep original font") },
+                onClick = { onSelect(null); expanded = false },
+            )
+            DropdownMenuItem(
+                text = { Text("Auto (match original)") },
+                onClick = { onSelect(AUTO_FONT_ID); expanded = false },
+            )
+            options.forEach { opt ->
+                DropdownMenuItem(
+                    text = { Text(fontLabel(opt)) },
+                    onClick = { onSelect(opt.id); expanded = false },
+                )
+            }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Add custom font") },
+                onClick = { expanded = false; onAddCustom() },
+            )
+        }
+    }
+}
+
+private fun fontLabel(o: FontOption): String = when (o.source) {
+    FontSource.SYSTEM -> "${o.displayName} (system)"
+    FontSource.CUSTOM -> "${o.displayName} (custom)"
+    FontSource.BUNDLED -> o.displayName
+}
+
 private fun buildRequest(
     target: EditTarget,
     x: String,
@@ -166,6 +244,7 @@ private fun buildRequest(
     fill: String,
     stroke: String,
     text: String,
+    fontId: String?,
 ): EditRequest {
     val caps = target.caps
     val nx = x.toFloatOrNull() ?: target.x
@@ -174,6 +253,8 @@ private fun buildRequest(
     val nh = h.toFloatOrNull() ?: target.h
     val parsedFill = if (caps.canFill) parseHex(fill) else null
     val parsedStroke = if (caps.canStroke) parseHex(stroke) else null
+    val textChanged = caps.canText && text != (target.text ?: "")
+    val fontChosen = caps.canText && fontId != null
     return EditRequest(
         dx = if (caps.canGeom) nx - target.x else 0f,
         dy = if (caps.canGeom) ny - target.y else 0f,
@@ -181,7 +262,8 @@ private fun buildRequest(
         scaleY = if (caps.canGeom && target.h != 0f && nh > 0f) nh / target.h else 1f,
         fillArgb = if (parsedFill != null && parsedFill != target.fillArgb) parsedFill else null,
         strokeArgb = if (parsedStroke != null && parsedStroke != target.strokeArgb) parsedStroke else null,
-        newText = if (caps.canText && text != (target.text ?: "")) text else null,
+        newText = if (textChanged || fontChosen) text else null,
+        fontEntryId = if (fontChosen) fontId else null,
     )
 }
 

@@ -240,11 +240,14 @@ fun InspectorScreen(
     }
 
     if (state.editingId != null) {
-        val target = remember(state.editingId, state.page) { viewModel.editTarget() }
+        val target = remember(state.editingId, state.page, state.fontCatalogTick) {
+            viewModel.editTarget()
+        }
         if (target != null) {
             ElementEditSheet(
                 target = target,
                 onApply = { req -> viewModel.applyEdit(context, req) },
+                onImportFont = { uri -> viewModel.importFont(context, uri) },
                 onDismiss = { viewModel.cancelEdit() },
             )
         }
