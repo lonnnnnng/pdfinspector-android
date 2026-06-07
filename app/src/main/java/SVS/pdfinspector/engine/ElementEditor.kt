@@ -185,11 +185,19 @@ object ElementEditor {
         out.add(Operator.getOperator(if (stroke) "RG" else "rg"))
     }
 
-    // Swap the page's content stream and flag the changed objects so
-    // PDDocument.saveIncremental rewrites just them, not the whole file.
-    // Incremental save only emits objects reachable from the trailer whose flag
-    // is set, so the whole chain catalog -> pages -> page must be flagged; the
-    // previous stream is unflagged so superseded edits don't pile up.
+    // Swap the page's content stream and flag what changed so saveIncremental
+    // appends just those objects instead of rewriting the whole file.
+    //
+    // setNeedToBeUpdated is a TRAVERSAL GATE, not only a write filter: the
+    // incremental writer walks the object graph from the trailer and refuses to
+    // descend into an unflagged object. So flagging only the page + new stream
+    // leaves them unreachable and the increment comes out empty. The entire
+    // chain catalog -> pages -> page -> stream must be flagged.
+    //
+    // Flags are never cleared by the writer and saveIncremental always re-reads
+    // the original bytes, so flags left on across edits make changes accumulate
+    // correctly. clearContentsFlag drops the superseded stream so orphaned
+    // streams don't pile up in the cache.
     private fun commit(document: PDDocument, page: PDPage, stream: PDStream) {
         clearContentsFlag(page.cosObject.getDictionaryObject(COSName.CONTENTS))
         page.setContents(stream)
