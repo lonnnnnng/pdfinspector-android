@@ -1,0 +1,43 @@
+Latin Modern fonts (TrueType build)
+
+The bundled LatinModernRoman, LatinModernSans and LatinModernMono TrueType
+files in this directory are converted from the Latin Modern OpenType fonts
+produced by the GUST e-foundry (Boguslaw Jackowski and Janusz M. Nowacki),
+themselves based on Donald E. Knuth's Computer Modern. The outlines were
+converted from cubic (CFF) to quadratic (glyf) curves for embedding; no
+glyphs were redrawn.
+
+Copyright 2003-2009 by B. Jackowski and J. M. Nowacki (on behalf of TeX
+Users Groups). The fonts are distributed under the GUST Font License (GFL),
+an addendum to the LaTeX Project Public License, reproduced below.
+
+----------------------------------------------------------------------
+
+% This is version 1.0, dated 22 June 2009, of the GUST Font License.
+% (GUST is the Polish TeX Users Group, https://www.gust.org.pl)
+%
+% For the most recent version of this license see
+% https://www.gust.org.pl/fonts/licenses/GUST-FONT-LICENSE.txt
+% or
+% https://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt
+%
+% This work may be distributed and/or modified under the conditions
+% of the LaTeX Project Public License, either version 1.3c of this
+% license or (at your option) any later version.
+%
+% Please also observe the following clause:
+% 1) it is requested, but not legally required, that derived works be
+%    distributed only after changing the names of the fonts comprising this
+%    work and given in an accompanying "manifest", and that the
+%    files comprising the Work, as listed in the manifest, also be given
+%    new names. Any exceptions to this request are also given in the
+%    manifest.
+%
+%    We recommend the manifest be given in a separate file named
+%    MANIFEST-<fontid>.txt, where <fontid> is some unique identification
+%    of the font family. If a separate "readme" file accompanies the Work,
+%    we recommend a name of the form README-<fontid>.txt.
+%
+% The latest version of the LaTeX Project Public License is in
+% https://www.latex-project.org/lppl.txt and version 1.3c or later
+% is part of all distributions of LaTeX version 2006/05/20 or later.
