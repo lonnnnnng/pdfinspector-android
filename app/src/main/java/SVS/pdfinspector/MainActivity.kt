@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -473,8 +474,9 @@ private fun InlineTextEditor(
     val top = rect.top * scale + offset.y
     val widthPx = (rect.width * scale).coerceAtLeast(32f)
     val heightPx = (rect.height * scale).coerceAtLeast(22f)
-    // The run box height is the text's em, so sizing the font to it matches the
-    // committed glyphs instead of looking shrunken.
+    // The run box is the text's em (ascent 0.75 to descent -0.25), so the font
+    // fills it and the baseline rests 75% down. Bottom aligning a naturally
+    // sized field lands the glyphs on that line with no top padding or clipping.
     val fontPx = (rect.height * scale).coerceAtLeast(14f)
     val fontSp = with(density) { fontPx.toSp() }
 
@@ -487,9 +489,7 @@ private fun InlineTextEditor(
             modifier = Modifier
                 .offset { IntOffset(left.roundToInt(), top.roundToInt()) }
                 .size(with(density) { widthPx.toDp() }, with(density) { heightPx.toDp() })
-                .background(Color.White)
                 .border(1.dp, textColor.copy(alpha = 0.6f)),
-            contentAlignment = Alignment.CenterStart,
         ) {
             BasicTextField(
                 value = value,
@@ -498,7 +498,6 @@ private fun InlineTextEditor(
                 textStyle = TextStyle(
                     color = textColor,
                     fontSize = fontSp,
-                    lineHeight = fontSp,
                     fontFamily = fontFamily,
                     platformStyle = PlatformTextStyle(includeFontPadding = false),
                 ),
@@ -507,6 +506,7 @@ private fun InlineTextEditor(
                 keyboardActions = KeyboardActions(onDone = { onCommit(value.text) }),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .wrapContentHeight(align = Alignment.Bottom, unbounded = true)
                     .focusRequester(focusRequester),
             )
         }
