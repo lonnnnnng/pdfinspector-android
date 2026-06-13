@@ -136,6 +136,14 @@ class FontCatalog(private val appContext: Context) {
             "LiberationSerif-BoldItalic" to "Liberation Serif Bold Italic",
             "LiberationMono-Regular" to "Liberation Mono",
             "LiberationMono-Bold" to "Liberation Mono Bold",
+            "Carlito-Regular" to "Carlito",
+            "Carlito-Bold" to "Carlito Bold",
+            "Carlito-Italic" to "Carlito Italic",
+            "Carlito-BoldItalic" to "Carlito Bold Italic",
+            "Caladea-Regular" to "Caladea",
+            "Caladea-Bold" to "Caladea Bold",
+            "Caladea-Italic" to "Caladea Italic",
+            "Caladea-BoldItalic" to "Caladea Bold Italic",
         )
         return defs.map { (file, label) ->
             Entry("bundled:$file", label, FontSource.BUNDLED, false) { doc ->
