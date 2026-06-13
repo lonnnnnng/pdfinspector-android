@@ -7,6 +7,8 @@ import com.tom_roush.fontbox.ttf.TrueTypeCollection
 import com.tom_roush.fontbox.ttf.TrueTypeFont
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.font.PDFont
+import com.tom_roush.pdfbox.pdmodel.font.PDFontDescriptor
+import com.tom_roush.pdfbox.pdmodel.font.PDPanoseClassification
 import com.tom_roush.pdfbox.pdmodel.font.PDType0Font
 import java.io.File
 import java.io.FileInputStream
@@ -67,38 +69,115 @@ class FontCatalog(private val appContext: Context) {
         }
     }
 
-    // Picks the closest bundled Liberation face to the original's descriptor.
-    fun autoMatchId(original: PDFont?): String? {
+    // Best catalog face for the original font. Exact metric-compatible name
+    // aliases (Arial, Times, Courier, Calibri, Cambria) and an exact system
+    // font by family are confident; Panose and flag bucketing are not.
+    fun autoMatchId(original: PDFont?): String? = matchInternal(original)?.id
+
+    // Only the high-confidence matches, for the prefer-confident edit policy.
+    fun confidentMatchId(original: PDFont?): String? =
+        matchInternal(original)?.takeIf { it.confident }?.id
+
+    private class Match(val id: String, val confident: Boolean)
+
+    private fun matchInternal(original: PDFont?): Match? {
         original ?: return null
         val desc = try {
             original.fontDescriptor
         } catch (_: Exception) {
             null
         }
-        val name = (desc?.fontName ?: "").substringAfter('+').lowercase()
-        val mono = desc?.isFixedPitch == true ||
-            listOf("mono", "courier", "consol").any { name.contains(it) }
-        val serif = !mono && (desc?.isSerif == true ||
-            listOf("times", "serif", "roman", "georgia", "minion", "garamond")
-                .any { name.contains(it) })
-        val bold = desc?.isForceBold == true || (desc?.fontWeight ?: 0f) >= 600f ||
-            listOf("bold", "black", "heavy", "semibold").any { name.contains(it) }
-        val italic = desc?.isItalic == true || (desc?.italicAngle ?: 0f) != 0f ||
-            listOf("italic", "oblique").any { name.contains(it) }
-        val family = when {
-            mono -> "Mono"
-            serif -> "Serif"
-            else -> "Sans"
+        val lower = (desc?.fontName ?: "").substringAfterLast('+').lowercase()
+        val family = normalizeFamily(desc?.fontName ?: "")
+        val panose = try {
+            desc?.panose?.panose
+        } catch (_: Exception) {
+            null
         }
-        val style = when {
-            family == "Mono" -> if (bold) "Bold" else "Regular"
+        val bold = desc?.isForceBold == true || (desc?.fontWeight ?: 0f) >= 600f ||
+            (panose?.weight ?: 0) >= 8 ||
+            listOf("bold", "black", "heavy", "semibold").any { lower.contains(it) }
+        val italic = desc?.isItalic == true || (desc?.italicAngle ?: 0f) != 0f ||
+            lower.contains("italic") || lower.contains("oblique")
+
+        aliasFamily(family)?.let {
+            return Match("bundled:$it-${styleSuffix(it, bold, italic)}", true)
+        }
+        systemMatch(family, bold, italic)?.let { return Match(it, true) }
+        val fam = bucketFamily(desc, lower, panose)
+        return Match("bundled:$fam-${styleSuffix(fam, bold, italic)}", false)
+    }
+
+    // Strips the subset tag, splits camelCase, and drops style and foundry
+    // tokens so "ABCDEF+TimesNewRomanPSMT" and "Times" both reduce to a family
+    // key the alias table and system scan can compare. Width words are kept so
+    // a condensed face never aliases onto a normal-width clone.
+    private fun normalizeFamily(raw: String): String {
+        val head = raw.substringAfterLast('+').substringBefore(',')
+        val spaced = head.replace(Regex("(?<=[a-z0-9])(?=[A-Z])"), " ")
+        return spaced.lowercase().split(Regex("[^a-z0-9]+"))
+            .filter { it.isNotBlank() && it !in FAMILY_NOISE }
+            .joinToString("")
+    }
+
+    private fun aliasFamily(family: String): String? {
+        if (WIDTH_WORDS.any { family.contains(it) }) return null
+        return when {
+            family.contains("calibri") -> "Carlito"
+            family.contains("cambria") -> "Caladea"
+            family.contains("arial") || family.contains("helvetica") -> "LiberationSans"
+            family.contains("times") -> "LiberationSerif"
+            family.contains("courier") -> "LiberationMono"
+            else -> null
+        }
+    }
+
+    // An exact full system font beats a metric clone when the device has it.
+    private fun systemMatch(family: String, bold: Boolean, italic: Boolean): String? {
+        if (family.length < 3) return null
+        var fallback: String? = null
+        for (e in system) {
+            val stem = e.id.substringAfterLast('/').substringBeforeLast('.')
+            if (normalizeFamily(stem) != family) continue
+            val low = stem.lowercase()
+            val eb = low.contains("bold")
+            val ei = low.contains("italic") || low.contains("oblique")
+            if (eb == bold && ei == italic) return e.id
+            if (fallback == null) fallback = e.id
+        }
+        return fallback
+    }
+
+    // Low-confidence fallback: Panose family/serif/proportion when present, else
+    // descriptor flags and name hints, mapped onto the Liberation generics.
+    private fun bucketFamily(
+        desc: PDFontDescriptor?,
+        lower: String,
+        panose: PDPanoseClassification?,
+    ): String {
+        if (panose != null && panose.familyKind == 2) {
+            if (panose.proportion == 9) return "LiberationMono"
+            if (panose.serifStyle in 11..15) return "LiberationSans"
+            if (panose.serifStyle in 2..10) return "LiberationSerif"
+        }
+        val mono = desc?.isFixedPitch == true ||
+            listOf("mono", "courier", "consol").any { lower.contains(it) }
+        if (mono) return "LiberationMono"
+        val serif = desc?.isSerif == true ||
+            listOf("times", "serif", "roman", "georgia", "minion", "garamond")
+                .any { lower.contains(it) }
+        return if (serif) "LiberationSerif" else "LiberationSans"
+    }
+
+    private fun styleSuffix(family: String, bold: Boolean, italic: Boolean): String =
+        if (family == "LiberationMono") {
+            if (bold) "Bold" else "Regular"
+        } else when {
             bold && italic -> "BoldItalic"
             bold -> "Bold"
             italic -> "Italic"
             else -> "Regular"
         }
-        return "bundled:Liberation$family-$style"
-    }
 
     fun importFont(uri: Uri): Boolean {
         return try {
@@ -236,6 +315,12 @@ class FontCatalog(private val appContext: Context) {
 
     companion object {
         private const val SUBSET_THRESHOLD = 4L * 1024 * 1024
+        private val FAMILY_NOISE = setOf(
+            "regular", "bold", "italic", "oblique", "light", "medium",
+            "semibold", "demibold", "demi", "semi", "black", "heavy", "thin",
+            "book", "roman", "mt", "ps", "psmt", "ms",
+        )
+        private val WIDTH_WORDS = listOf("narrow", "condensed", "cond", "expanded", "extended")
         private val SYSTEM_PREFIXES = listOf(
             "Roboto-", "RobotoFlex",
             "NotoSans-", "NotoSerif-", "NotoSansMono",
