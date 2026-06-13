@@ -489,6 +489,7 @@ private fun InlineTextEditor(
             modifier = Modifier
                 .offset { IntOffset(left.roundToInt(), top.roundToInt()) }
                 .size(with(density) { widthPx.toDp() }, with(density) { heightPx.toDp() })
+                .background(Color.White)
                 .border(1.dp, textColor.copy(alpha = 0.6f)),
         ) {
             BasicTextField(
