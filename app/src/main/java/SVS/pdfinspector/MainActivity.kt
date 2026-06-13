@@ -11,6 +11,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -27,6 +30,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -44,16 +50,27 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -274,11 +291,26 @@ private fun Workspace(
     val page = state.page ?: return
     val transform = state.pageTransform
 
+    val context = LocalContext.current
     val leafRects = remember(page, transform) {
         if (transform != null) {
             page.leaves.mapNotNull { n -> n.bounds?.let { LeafRect(n.id, transform.toRect(it)) } }
         } else {
             emptyList()
+        }
+    }
+    // Every Tj/TJ run inside a BT..ET, boxed so it can be tapped and retyped.
+    val runBoxes = remember(page, transform) {
+        if (transform == null) {
+            emptyList()
+        } else {
+            page.leaves
+                .asSequence()
+                .filter { it.kind == NodeKind.TEXT }
+                .flatMap { it.children.asSequence() }
+                .filter { it.kind == NodeKind.TEXT && !it.text.isNullOrBlank() && it.bounds != null }
+                .map { LeafRect(it.id, transform.toRect(it.bounds!!)) }
+                .toList()
         }
     }
     val selectedRect = remember(page, transform, state.selectedId) {
@@ -289,6 +321,8 @@ private fun Workspace(
 
     val highlight = MaterialTheme.colorScheme.primary
     val backdrop = MaterialTheme.colorScheme.surfaceVariant
+    val runBoxColor = MaterialTheme.colorScheme.outline
+    var editingRunId by remember(page) { mutableStateOf<Int?>(null) }
     val bmp = state.bitmap
 
     // Held here, not inside PdfCanvas, so zoom/pan persist when the canvas moves
@@ -298,24 +332,47 @@ private fun Workspace(
 
     val canvas: @Composable (Modifier) -> Unit = { mod ->
         if (bmp != null) {
-            PdfCanvas(
-                bitmap = bmp,
-                pageIndex = state.pageIndex,
-                scaleState = scaleState,
-                offsetState = offsetState,
-                leaves = leafRects,
-                selectedRect = selectedRect,
-                highlightColor = highlight,
-                backdropColor = backdrop,
-                fitMode = fitMode,
-                onUserTransform = onUserTransform,
-                onSelect = { id -> viewModel.select(id, reveal = true) },
-                renderTile = { idx, src, outW, outH ->
-                    viewModel.renderRegion(idx, src.left, src.top, src.right, src.bottom, outW, outH)
-                        ?.asImageBitmap()
-                },
-                modifier = mod,
-            )
+            Box(mod) {
+                PdfCanvas(
+                    bitmap = bmp,
+                    pageIndex = state.pageIndex,
+                    scaleState = scaleState,
+                    offsetState = offsetState,
+                    leaves = leafRects,
+                    selectedRect = selectedRect,
+                    highlightColor = highlight,
+                    backdropColor = backdrop,
+                    runBoxes = runBoxes,
+                    editingRunId = editingRunId,
+                    textBoxColor = runBoxColor,
+                    onEditRun = { id -> editingRunId = id },
+                    fitMode = fitMode,
+                    onUserTransform = onUserTransform,
+                    onSelect = { id -> viewModel.select(id, reveal = true) },
+                    renderTile = { idx, src, outW, outH ->
+                        viewModel.renderRegion(idx, src.left, src.top, src.right, src.bottom, outW, outH)
+                            ?.asImageBitmap()
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+                val er = editingRunId
+                val run = if (er != null && transform != null) findNode(page.root, er) else null
+                val rect = run?.bounds?.let { transform?.toRect(it) }
+                if (er != null && run != null && rect != null) {
+                    InlineTextEditor(
+                        runId = er,
+                        rect = rect,
+                        scale = scaleState.value,
+                        offset = offsetState.value,
+                        initial = run.text ?: "",
+                        textColor = run.colorArgb?.let { Color(it) } ?: Color.Black,
+                        onCommit = { newText ->
+                            editingRunId = null
+                            viewModel.applyInlineText(context, er, newText)
+                        },
+                    )
+                }
+            }
         } else {
             Box(mod, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         }
@@ -373,6 +430,60 @@ private fun Workspace(
             InspectorDock(dock, false, sizeDp, onResize, Modifier.fillMaxWidth()) { pane() }
         }
     }
+}
+
+// A text field pinned over the tapped run. Position and size follow the live
+// zoom/pan so it sits exactly on the glyphs; committing hands the new string to
+// the same run rewrite the edit sheet uses. The scrim commits on a tap away.
+@Composable
+private fun InlineTextEditor(
+    runId: Int,
+    rect: Rect,
+    scale: Float,
+    offset: Offset,
+    initial: String,
+    textColor: Color,
+    onCommit: (String) -> Unit,
+) {
+    val density = LocalDensity.current
+    val focusRequester = remember { FocusRequester() }
+    var value by remember(runId) {
+        mutableStateOf(TextFieldValue(initial, TextRange(initial.length)))
+    }
+    val left = rect.left * scale + offset.x
+    val top = rect.top * scale + offset.y
+    val widthPx = (rect.width * scale).coerceAtLeast(32f)
+    val heightPx = (rect.height * scale).coerceAtLeast(22f)
+    val fontPx = (rect.height * scale * 0.72f).coerceAtLeast(11f)
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .pointerInput(runId) { detectTapGestures { onCommit(value.text) } },
+    ) {
+        Box(
+            modifier = Modifier
+                .offset { IntOffset(left.roundToInt(), top.roundToInt()) }
+                .size(with(density) { widthPx.toDp() }, with(density) { heightPx.toDp() })
+                .background(Color.White)
+                .border(1.dp, textColor.copy(alpha = 0.6f)),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            BasicTextField(
+                value = value,
+                onValueChange = { value = it },
+                singleLine = true,
+                textStyle = TextStyle(color = textColor, fontSize = with(density) { fontPx.toSp() }),
+                cursorBrush = SolidColor(textColor),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { onCommit(value.text) }),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester),
+            )
+        }
+    }
+    LaunchedEffect(runId) { focusRequester.requestFocus() }
 }
 
 @Composable

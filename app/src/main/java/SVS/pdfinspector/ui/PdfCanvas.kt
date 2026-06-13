@@ -48,6 +48,10 @@ fun PdfCanvas(
     selectedRect: Rect?,
     highlightColor: Color,
     backdropColor: Color,
+    runBoxes: List<LeafRect>,
+    editingRunId: Int?,
+    textBoxColor: Color,
+    onEditRun: (Int) -> Unit,
     fitMode: FitMode,
     onUserTransform: () -> Unit,
     onSelect: (Int?) -> Unit,
@@ -140,11 +144,16 @@ fun PdfCanvas(
                         scale = newScale
                     }
                 }
-                .pointerInput(bitmap, leaves) {
+                .pointerInput(bitmap, leaves, runBoxes) {
                     detectTapGestures { tap ->
                         val point = Offset((tap.x - offset.x) / scale, (tap.y - offset.y) / scale)
-                        val hit = leaves.lastOrNull { it.rect.contains(point) }
-                        onSelect(hit?.id)
+                        val run = runBoxes.lastOrNull { it.rect.contains(point) }
+                        if (run != null) {
+                            onEditRun(run.id)
+                        } else {
+                            val hit = leaves.lastOrNull { it.rect.contains(point) }
+                            onSelect(hit?.id)
+                        }
                     }
                 },
         ) {
@@ -173,6 +182,17 @@ fun PdfCanvas(
                             filterQuality = FilterQuality.High,
                         )
                     }
+                }
+                val runStroke = (1f / scale).coerceAtLeast(0.4f)
+                for (rb in runBoxes) {
+                    if (rb.id == editingRunId) continue
+                    drawRect(color = textBoxColor.copy(alpha = 0.06f), topLeft = rb.rect.topLeft, size = rb.rect.size)
+                    drawRect(
+                        color = textBoxColor.copy(alpha = 0.5f),
+                        topLeft = rb.rect.topLeft,
+                        size = rb.rect.size,
+                        style = Stroke(width = runStroke),
+                    )
                 }
                 selectedRect?.let { r ->
                     drawRect(color = highlightColor.copy(alpha = 0.18f), topLeft = r.topLeft, size = r.size)
