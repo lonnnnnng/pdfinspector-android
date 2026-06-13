@@ -125,6 +125,7 @@ class FontCatalog(private val appContext: Context) {
         val italic = desc?.isItalic == true || (desc?.italicAngle ?: 0f) != 0f ||
             lower.contains("italic") || lower.contains("oblique")
 
+        texMatch(family, lower, bold, italic)?.let { return Match(it, true) }
         aliasFamily(family)?.let {
             return Match("bundled:$it-${styleSuffix(it, bold, italic)}", true)
         }
@@ -143,6 +144,35 @@ class FontCatalog(private val appContext: Context) {
         return spaced.lowercase().split(Regex("[^a-z0-9]+"))
             .filter { it.isNotBlank() && it !in FAMILY_NOISE }
             .joinToString("")
+    }
+
+    // Computer Modern and its descendants (Latin Modern, New Computer Modern,
+    // Computer Modern Unicode) are the LaTeX and Typst defaults. Latin Modern is
+    // the faithful continuation of Computer Modern, so it stands in for all of
+    // them. Subset names are terse (CMR10, CMBX12, CMTI10), so match on the
+    // telltale stems, by family substring or by raw-name prefix.
+    private fun texMatch(family: String, lower: String, bold: Boolean, italic: Boolean): String? {
+        fun has(stem: String) = family.contains(stem) || lower.startsWith(stem)
+        val isTex = listOf(
+            "computermodern", "latinmodern", "newcomputermodern", "newcm",
+            "lmroman", "lmsans", "lmmono", "cmun",
+            "cmr", "cmbx", "cmss", "cmtt", "cmti", "cmsl", "cmcsc", "cmmi",
+            "cmbright", "cmbr",
+        ).any { has(it) }
+        if (!isTex) return null
+        val fam = when {
+            listOf("lmmono", "cmtt", "cmsltt", "cmitt", "cmtex", "newcmmono", "cmuntt", "cmuntb")
+                .any { has(it) } -> "LatinModernMono"
+            listOf("lmsans", "cmss", "newcmsans", "cmbright", "cmbr", "cmunss")
+                .any { has(it) } -> "LatinModernSans"
+            else -> "LatinModernRoman"
+        }
+        val texBold = bold || lower.contains("bold") ||
+            listOf("cmbx", "cmssbx", "cmunbx").any { lower.startsWith(it) }
+        val texItalic = italic ||
+            listOf("italic", "oblique", "slant").any { lower.contains(it) } ||
+            listOf("cmti", "cmsl", "cmmi", "cmunti", "cmunsl", "cmunit").any { lower.startsWith(it) }
+        return "bundled:$fam-${styleSuffix(fam, texBold, texItalic)}"
     }
 
     private fun aliasFamily(family: String): String? {
@@ -195,13 +225,15 @@ class FontCatalog(private val appContext: Context) {
     }
 
     private fun styleSuffix(family: String, bold: Boolean, italic: Boolean): String =
-        if (family == "LiberationMono") {
-            if (bold) "Bold" else "Regular"
-        } else when {
-            bold && italic -> "BoldItalic"
-            bold -> "Bold"
-            italic -> "Italic"
-            else -> "Regular"
+        when (family) {
+            "LiberationMono" -> if (bold) "Bold" else "Regular"
+            "LatinModernMono" -> if (italic) "Italic" else "Regular"
+            else -> when {
+                bold && italic -> "BoldItalic"
+                bold -> "Bold"
+                italic -> "Italic"
+                else -> "Regular"
+            }
         }
 
     fun importFont(uri: Uri): Boolean {
@@ -248,6 +280,16 @@ class FontCatalog(private val appContext: Context) {
             "Caladea-Bold" to "Caladea Bold",
             "Caladea-Italic" to "Caladea Italic",
             "Caladea-BoldItalic" to "Caladea Bold Italic",
+            "LatinModernRoman-Regular" to "Latin Modern Roman",
+            "LatinModernRoman-Bold" to "Latin Modern Roman Bold",
+            "LatinModernRoman-Italic" to "Latin Modern Roman Italic",
+            "LatinModernRoman-BoldItalic" to "Latin Modern Roman Bold Italic",
+            "LatinModernSans-Regular" to "Latin Modern Sans",
+            "LatinModernSans-Bold" to "Latin Modern Sans Bold",
+            "LatinModernSans-Italic" to "Latin Modern Sans Italic",
+            "LatinModernSans-BoldItalic" to "Latin Modern Sans Bold Italic",
+            "LatinModernMono-Regular" to "Latin Modern Mono",
+            "LatinModernMono-Italic" to "Latin Modern Mono Italic",
         )
         return defs.map { (file, label) ->
             Entry("bundled:$file", label, FontSource.BUNDLED, false) { doc ->
