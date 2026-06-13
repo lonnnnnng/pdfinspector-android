@@ -182,9 +182,25 @@ class PdfDocumentViewModel : ViewModel() {
     }
 
     fun applyEdit(context: Context, request: EditRequest) {
+        val node = findNode(parsed?.root ?: return, state.editingId) ?: return
+        applyEditInternal(context, node, request)
+    }
+
+    // Inline canvas editing: retype one text run in place. Always routes through
+    // the auto fallback so the new characters are guaranteed to encode, matching
+    // the edit sheet's default.
+    fun applyInlineText(context: Context, id: Int, newText: String) {
+        val node = findNode(parsed?.root ?: return, id) ?: return
+        if (node.kind != NodeKind.TEXT) return
+        if (newText == (node.text ?: "")) return
+        applyEditInternal(
+            context, node, EditRequest(newText = newText, fontEntryId = AUTO_FONT_ID),
+        )
+    }
+
+    private fun applyEditInternal(context: Context, node: DrawNode, request: EditRequest) {
         val doc = document ?: return
         val parsedPage = parsed ?: return
-        val node = findNode(parsedPage.root, state.editingId) ?: return
         val pageIndex = state.pageIndex
         viewModelScope.launch {
             // editElement is cheap and may reject; do it first so a failed edit
