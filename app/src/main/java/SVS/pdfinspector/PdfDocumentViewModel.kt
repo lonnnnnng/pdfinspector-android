@@ -227,10 +227,20 @@ class PdfDocumentViewModel : ViewModel() {
     }
 
     private fun resolveSubstitute(doc: PDDocument, node: DrawNode, request: EditRequest): PDFont? {
-        val id = request.fontEntryId ?: return null
         val cat = fontCatalog ?: return null
-        val realId = if (id == AUTO_FONT_ID) cat.autoMatchId(node.font) else id
-        return realId?.let { cat.resolve(doc, it) }
+        val id = request.fontEntryId
+        if (id != null) {
+            val realId = if (id == AUTO_FONT_ID) cat.autoMatchId(node.font) else id
+            return realId?.let { cat.resolve(doc, it) }
+        }
+        // Prefer-confident policy: on a text edit, swap to a precisely
+        // identified metric-compatible font even when the original could
+        // encode, so missing glyphs and unreliable embedded widths stop biting.
+        if (request.newText != null) {
+            val realId = cat.confidentMatchId(node.font) ?: return null
+            return cat.resolve(doc, realId)
+        }
+        return null
     }
 
     fun importFont(context: Context, uri: Uri) {

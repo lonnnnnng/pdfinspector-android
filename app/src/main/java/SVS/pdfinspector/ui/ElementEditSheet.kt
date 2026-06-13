@@ -155,8 +155,9 @@ fun ElementEditSheet(
                     )
                 }
                 Text(
-                    "Re-encoded with the element's font. Turn on a fallback when " +
-                        "the original font is missing characters.",
+                    "Kept in the element's font, or an exact match when the font " +
+                        "is recognised. Turn on a fallback to pick the substitute " +
+                        "yourself.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
