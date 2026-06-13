@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -60,6 +62,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.PlatformTextStyle
@@ -79,8 +82,11 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import compose.icons.TablerIcons
+import compose.icons.tablericons.Bug
+import compose.icons.tablericons.Bulb
 import compose.icons.tablericons.FileText
 import compose.icons.tablericons.Folder
+import compose.icons.tablericons.Heart
 import compose.icons.tablericons.Settings
 import SVS.pdfinspector.engine.NodeKind
 import SVS.pdfinspector.engine.findNode
@@ -508,8 +514,13 @@ private fun InlineTextEditor(
     LaunchedEffect(runId) { focusRequester.requestFocus() }
 }
 
+private const val FEATURE_URL = "https://github.com/shardulvs/pdfinspector-android/issues/new?labels=enhancement"
+private const val BUG_URL = "https://github.com/shardulvs/pdfinspector-android/issues/new?labels=bug"
+private const val SPONSOR_URL = "https://github.com/sponsors/shardulvs"
+
 @Composable
 private fun EmptyState(onOpen: () -> Unit) {
+    val uriHandler = LocalUriHandler.current
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.padding(24.dp),
@@ -535,6 +546,36 @@ private fun EmptyState(onOpen: () -> Unit) {
             Icon(TablerIcons.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text("Open a PDF")
+        }
+        Spacer(Modifier.height(40.dp))
+        Text(
+            "Help make PdfInspector better",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AssistChip(
+                onClick = { uriHandler.openUri(FEATURE_URL) },
+                label = { Text("Feature") },
+                leadingIcon = {
+                    Icon(TablerIcons.Bulb, contentDescription = null, modifier = Modifier.size(18.dp))
+                },
+            )
+            AssistChip(
+                onClick = { uriHandler.openUri(BUG_URL) },
+                label = { Text("Bug") },
+                leadingIcon = {
+                    Icon(TablerIcons.Bug, contentDescription = null, modifier = Modifier.size(18.dp))
+                },
+            )
+            AssistChip(
+                onClick = { uriHandler.openUri(SPONSOR_URL) },
+                label = { Text("Sponsor") },
+                leadingIcon = {
+                    Icon(TablerIcons.Heart, contentDescription = null, modifier = Modifier.size(18.dp))
+                },
+            )
         }
     }
 }
