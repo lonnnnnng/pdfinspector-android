@@ -62,6 +62,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
@@ -466,7 +467,10 @@ private fun InlineTextEditor(
     val top = rect.top * scale + offset.y
     val widthPx = (rect.width * scale).coerceAtLeast(32f)
     val heightPx = (rect.height * scale).coerceAtLeast(22f)
-    val fontPx = (rect.height * scale * 0.72f).coerceAtLeast(11f)
+    // The run box height is the text's em, so sizing the font to it matches the
+    // committed glyphs instead of looking shrunken.
+    val fontPx = (rect.height * scale).coerceAtLeast(14f)
+    val fontSp = with(density) { fontPx.toSp() }
 
     Box(
         Modifier
@@ -487,8 +491,10 @@ private fun InlineTextEditor(
                 singleLine = true,
                 textStyle = TextStyle(
                     color = textColor,
-                    fontSize = with(density) { fontPx.toSp() },
+                    fontSize = fontSp,
+                    lineHeight = fontSp,
                     fontFamily = fontFamily,
+                    platformStyle = PlatformTextStyle(includeFontPadding = false),
                 ),
                 cursorBrush = SolidColor(textColor),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
