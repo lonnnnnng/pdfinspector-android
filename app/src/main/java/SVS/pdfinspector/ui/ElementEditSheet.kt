@@ -56,8 +56,8 @@ fun ElementEditSheet(
     var fill by remember(id) { mutableStateOf(target.fillArgb?.let(::argbToHex) ?: "") }
     var stroke by remember(id) { mutableStateOf(target.strokeArgb?.let(::argbToHex) ?: "") }
     var text by remember(id) { mutableStateOf(target.text ?: "") }
-    var useFallback by remember(id) { mutableStateOf(false) }
-    var fontId by remember(id) { mutableStateOf<String?>(null) }
+    var useFallback by remember(id) { mutableStateOf(true) }
+    var fontId by remember(id) { mutableStateOf<String?>(AUTO_FONT_ID) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent(),
@@ -155,9 +155,13 @@ fun ElementEditSheet(
                     )
                 }
                 Text(
-                    "Kept in the element's font, or an exact match when the font " +
-                        "is recognised. Turn on a fallback to pick the substitute " +
-                        "yourself.",
+                    if (useFallback) {
+                        "Auto picks the closest match to the original font. Pick " +
+                            "another or add your own from the list."
+                    } else {
+                        "Re-encoded with the element's own font, swapping to an " +
+                            "exact match only when one is recognised."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
