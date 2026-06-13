@@ -78,6 +78,31 @@ class FontCatalog(private val appContext: Context) {
     fun confidentMatchId(original: PDFont?): String? =
         matchInternal(original)?.takeIf { it.confident }?.id
 
+    // A loadable typeface for the auto match so the inline editor can render the
+    // fallback while typing, matching what the commit will embed.
+    fun autoMatchFace(original: PDFont?): FaceSource? = autoMatchId(original)?.let { faceFor(it) }
+
+    // Maps a catalog id to where its glyphs live, for previewing in Compose.
+    // Null for .ttc collections, which the Compose font loader can't open.
+    fun faceFor(id: String): FaceSource? = when {
+        id.startsWith("bundled:") ->
+            FaceSource.Asset("fonts/${id.substringAfter("bundled:")}.ttf")
+        id.startsWith("system:") -> {
+            val path = id.substringAfter("system:")
+            if (path.endsWith(".ttc", true)) null else FaceSource.FileFace(File(path))
+        }
+        id.startsWith("custom:") -> {
+            val name = id.substringAfter("custom:")
+            if (name.endsWith(".ttc", true)) null else FaceSource.FileFace(File(customDir, name))
+        }
+        else -> null
+    }
+
+    sealed class FaceSource {
+        class Asset(val path: String) : FaceSource()
+        class FileFace(val file: File) : FaceSource()
+    }
+
     private class Match(val id: String, val confident: Boolean)
 
     private fun matchInternal(original: PDFont?): Match? {

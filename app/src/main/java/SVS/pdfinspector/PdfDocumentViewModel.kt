@@ -198,6 +198,13 @@ class PdfDocumentViewModel : ViewModel() {
         )
     }
 
+    // The fallback face the inline editor renders while typing, matching what
+    // applyInlineText embeds (the auto match for the run's own font).
+    fun inlineFontFace(id: Int): FontCatalog.FaceSource? {
+        val node = findNode(parsed?.root ?: return null, id) ?: return null
+        return fontCatalog?.autoMatchFace(node.font)
+    }
+
     private fun applyEditInternal(context: Context, node: DrawNode, request: EditRequest) {
         val doc = document ?: return
         val parsedPage = parsed ?: return

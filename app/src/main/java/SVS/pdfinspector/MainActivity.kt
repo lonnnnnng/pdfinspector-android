@@ -64,6 +64,8 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
@@ -359,6 +361,14 @@ private fun Workspace(
                 val run = if (er != null && transform != null) findNode(page.root, er) else null
                 val rect = run?.bounds?.let { transform?.toRect(it) }
                 if (er != null && run != null && rect != null) {
+                    val fontFamily = remember(er) {
+                        when (val face = viewModel.inlineFontFace(er)) {
+                            is FontCatalog.FaceSource.Asset ->
+                                FontFamily(Font(path = face.path, assetManager = context.assets))
+                            is FontCatalog.FaceSource.FileFace -> FontFamily(Font(file = face.file))
+                            null -> null
+                        }
+                    }
                     InlineTextEditor(
                         runId = er,
                         rect = rect,
@@ -366,6 +376,7 @@ private fun Workspace(
                         offset = offsetState.value,
                         initial = run.text ?: "",
                         textColor = run.colorArgb?.let { Color(it) } ?: Color.Black,
+                        fontFamily = fontFamily,
                         onCommit = { newText ->
                             editingRunId = null
                             viewModel.applyInlineText(context, er, newText)
@@ -443,6 +454,7 @@ private fun InlineTextEditor(
     offset: Offset,
     initial: String,
     textColor: Color,
+    fontFamily: FontFamily?,
     onCommit: (String) -> Unit,
 ) {
     val density = LocalDensity.current
@@ -473,7 +485,11 @@ private fun InlineTextEditor(
                 value = value,
                 onValueChange = { value = it },
                 singleLine = true,
-                textStyle = TextStyle(color = textColor, fontSize = with(density) { fontPx.toSp() }),
+                textStyle = TextStyle(
+                    color = textColor,
+                    fontSize = with(density) { fontPx.toSp() },
+                    fontFamily = fontFamily,
+                ),
                 cursorBrush = SolidColor(textColor),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { onCommit(value.text) }),
