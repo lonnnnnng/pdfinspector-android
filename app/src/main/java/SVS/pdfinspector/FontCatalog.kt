@@ -24,6 +24,15 @@ class FontOption(
     val source: FontSource,
 )
 
+// Why a given substitute was chosen, surfaced in the debug overlay.
+class MatchExplain(
+    val original: String,
+    val step: String,
+    val match: String?,
+    val confident: Boolean,
+    val detail: String?,
+)
+
 // Supplies replacement fonts for text edits from three places: Liberation
 // fonts bundled in assets, the device's /system/fonts, and user imports kept
 // in filesDir. resolve embeds a chosen font into the open document; small
@@ -78,6 +87,20 @@ class FontCatalog(private val appContext: Context) {
     fun confidentMatchId(original: PDFont?): String? =
         matchInternal(original)?.takeIf { it.confident }?.id
 
+    // Which matcher step decided, for the debug overlay.
+    fun explainMatch(original: PDFont?): MatchExplain {
+        val m = matchInternal(original)
+        val name = (try {
+            original?.fontDescriptor?.fontName
+        } catch (_: Exception) {
+            null
+        }) ?: "(none)"
+        return MatchExplain(
+            name.substringAfterLast('+'), m?.step ?: "none",
+            m?.id?.removePrefix("bundled:"), m?.confident ?: false, m?.detail,
+        )
+    }
+
     // A loadable typeface for the auto match so the inline editor can render the
     // fallback while typing, matching what the commit will embed.
     fun autoMatchFace(original: PDFont?): FaceSource? = autoMatchId(original)?.let { faceFor(it) }
@@ -103,7 +126,12 @@ class FontCatalog(private val appContext: Context) {
         class FileFace(val file: File) : FaceSource()
     }
 
-    private class Match(val id: String, val confident: Boolean)
+    private class Match(
+        val id: String,
+        val confident: Boolean,
+        val step: String,
+        val detail: String? = null,
+    )
 
     private fun matchInternal(original: PDFont?): Match? {
         original ?: return null
@@ -125,13 +153,16 @@ class FontCatalog(private val appContext: Context) {
         val italic = desc?.isItalic == true || (desc?.italicAngle ?: 0f) != 0f ||
             lower.contains("italic") || lower.contains("oblique")
 
-        texMatch(family, lower, bold, italic)?.let { return Match(it, true) }
+        texMatch(family, lower, bold, italic)?.let { return Match(it, true, "tex") }
         aliasFamily(family)?.let {
-            return Match("bundled:$it-${styleSuffix(it, bold, italic)}", true)
+            return Match("bundled:$it-${styleSuffix(it, bold, italic)}", true, "alias")
         }
-        systemMatch(family, bold, italic)?.let { return Match(it, true) }
+        systemMatch(family, bold, italic)?.let { return Match(it, true, "system") }
+        widthMatch(original, desc, lower, panose)?.let { (fam, detail) ->
+            return Match("bundled:$fam-${styleSuffix(fam, bold, italic)}", true, "width", detail)
+        }
         val fam = bucketFamily(desc, lower, panose)
-        return Match("bundled:$fam-${styleSuffix(fam, bold, italic)}", false)
+        return Match("bundled:$fam-${styleSuffix(fam, bold, italic)}", false, "panose")
     }
 
     // Strips the subset tag, splits camelCase, and drops style and foundry
@@ -232,6 +263,85 @@ class FontCatalog(private val appContext: Context) {
             listOf("times", "serif", "roman", "georgia", "minion", "garamond")
                 .any { lower.contains(it) }
         return if (serif) "LiberationSerif" else "LiberationSans"
+    }
+
+    // Pre-Panose refinement: a subset embeds real advance widths even when its
+    // name is gone, and the bundled clones are metric-compatible, so the closest
+    // width profile is the best substitute. Per-char widths are mean-normalized
+    // so weight and scale drop out. Confident only on a tight match that no
+    // serif/mono signal contradicts; otherwise the Panose bucket decides.
+    private fun widthMatch(
+        original: PDFont,
+        desc: PDFontDescriptor?,
+        lower: String,
+        panose: PDPanoseClassification?,
+    ): Pair<String, String>? {
+        val ow = FloatArray(WIDTH_REF.length)
+        val has = BooleanArray(WIDTH_REF.length)
+        var n = 0
+        for (i in WIDTH_REF.indices) {
+            val w = try {
+                original.getStringWidth(WIDTH_REF[i].toString())
+            } catch (_: Exception) {
+                0f
+            }
+            if (w > 0f) { ow[i] = w; has[i] = true; n++ }
+        }
+        if (n < WIDTH_MIN_SHARED) return null
+        var oMean = 0f
+        for (i in WIDTH_REF.indices) if (has[i]) oMean += ow[i]
+        oMean /= n
+        if (oMean <= 0f) return null
+        var best = Float.MAX_VALUE
+        var second = Float.MAX_VALUE
+        var bestFam: String? = null
+        for ((fam, cw) in WIDTH_TABLE) {
+            var cMean = 0f
+            for (i in WIDTH_REF.indices) if (has[i]) cMean += cw[i]
+            cMean /= n
+            if (cMean <= 0f) continue
+            var d = 0f
+            for (i in WIDTH_REF.indices) if (has[i]) d += kotlin.math.abs(ow[i] / oMean - cw[i] / cMean)
+            d /= n
+            if (d < best) {
+                second = best; best = d; bestFam = fam
+            } else if (d < second) {
+                second = d
+            }
+        }
+        val fam = bestFam ?: return null
+        val hint = categoryHint(desc, lower, panose)
+        if (best > WIDTH_THRESH || (hint != null && famCategory(fam) != hint)) return null
+        return fam to "d=%.3f next %.3f".format(best, second)
+    }
+
+    // serif/sans/mono only when a flag, Panose, or name positively says so; null
+    // means no firm signal, so it must not veto a width pick.
+    private fun categoryHint(
+        desc: PDFontDescriptor?,
+        lower: String,
+        panose: PDPanoseClassification?,
+    ): String? {
+        if (panose != null && panose.familyKind == 2) {
+            if (panose.proportion == 9) return "mono"
+            if (panose.serifStyle in 11..15) return "sans"
+            if (panose.serifStyle in 2..10) return "serif"
+        }
+        if (desc?.isFixedPitch == true || listOf("mono", "courier", "consol").any { lower.contains(it) }) {
+            return "mono"
+        }
+        if (desc?.isSerif == true ||
+            listOf("times", "serif", "roman", "georgia", "minion", "garamond").any { lower.contains(it) }
+        ) {
+            return "serif"
+        }
+        return null
+    }
+
+    private fun famCategory(fam: String): String = when (fam) {
+        "LiberationMono", "LatinModernMono" -> "mono"
+        "LiberationSans", "Carlito", "URWGothic", "LatinModernSans" -> "sans"
+        else -> "serif"
     }
 
     private fun styleSuffix(family: String, bold: Boolean, italic: Boolean): String =
@@ -418,6 +528,24 @@ class FontCatalog(private val appContext: Context) {
 
     companion object {
         private const val SUBSET_THRESHOLD = 4L * 1024 * 1024
+        private const val WIDTH_THRESH = 0.06f
+        private const val WIDTH_MIN_SHARED = 8
+        private const val WIDTH_REF = "iltfraeonscmwuHINOMWg"
+        private val WIDTH_TABLE: Map<String, FloatArray> = mapOf(
+            "LiberationSans" to floatArrayOf(222f, 222f, 278f, 278f, 333f, 556f, 556f, 556f, 556f, 500f, 500f, 833f, 722f, 556f, 722f, 278f, 722f, 778f, 833f, 944f, 556f),
+            "LiberationSerif" to floatArrayOf(278f, 278f, 278f, 333f, 333f, 444f, 444f, 500f, 500f, 389f, 444f, 778f, 722f, 500f, 722f, 333f, 722f, 722f, 889f, 944f, 500f),
+            "LiberationMono" to floatArrayOf(600f, 600f, 600f, 600f, 600f, 600f, 600f, 600f, 600f, 600f, 600f, 600f, 600f, 600f, 600f, 600f, 600f, 600f, 600f, 600f, 600f),
+            "Carlito" to floatArrayOf(229f, 229f, 335f, 305f, 349f, 479f, 498f, 527f, 525f, 391f, 423f, 799f, 715f, 525f, 623f, 252f, 646f, 662f, 855f, 890f, 471f),
+            "Caladea" to floatArrayOf(277f, 271f, 325f, 313f, 396f, 470f, 441f, 480f, 558f, 392f, 421f, 813f, 720f, 546f, 696f, 343f, 693f, 599f, 888f, 889f, 459f),
+            "Gelasio" to floatArrayOf(293f, 286f, 345f, 325f, 410f, 504f, 483f, 539f, 591f, 432f, 454f, 881f, 737f, 575f, 815f, 390f, 767f, 744f, 927f, 976f, 509f),
+            "P052" to floatArrayOf(291f, 291f, 326f, 333f, 395f, 500f, 479f, 546f, 582f, 424f, 444f, 883f, 834f, 603f, 832f, 337f, 831f, 786f, 946f, 1000f, 556f),
+            "URWBookman" to floatArrayOf(300f, 300f, 380f, 320f, 440f, 580f, 520f, 560f, 660f, 520f, 520f, 940f, 780f, 680f, 800f, 340f, 740f, 800f, 920f, 960f, 540f),
+            "URWGothic" to floatArrayOf(200f, 200f, 339f, 314f, 301f, 683f, 650f, 655f, 610f, 388f, 647f, 938f, 831f, 608f, 683f, 226f, 740f, 869f, 919f, 960f, 673f),
+            "C059" to floatArrayOf(315f, 315f, 389f, 333f, 444f, 556f, 500f, 500f, 611f, 463f, 444f, 889f, 778f, 611f, 833f, 407f, 815f, 778f, 944f, 981f, 537f),
+            "LatinModernRoman" to floatArrayOf(278f, 278f, 389f, 306f, 392f, 500f, 444f, 500f, 556f, 394f, 444f, 833f, 722f, 556f, 750f, 361f, 750f, 778f, 917f, 1028f, 500f),
+            "LatinModernSans" to floatArrayOf(239f, 239f, 361f, 306f, 342f, 481f, 444f, 500f, 517f, 383f, 444f, 794f, 683f, 517f, 708f, 278f, 708f, 736f, 875f, 944f, 500f),
+            "LatinModernMono" to floatArrayOf(525f, 525f, 525f, 525f, 525f, 525f, 525f, 525f, 525f, 525f, 525f, 525f, 525f, 525f, 525f, 525f, 525f, 525f, 525f, 525f, 525f),
+        )
         private val FAMILY_NOISE = setOf(
             "regular", "bold", "italic", "oblique", "light", "medium",
             "semibold", "demibold", "demi", "semi", "black", "heavy", "thin",
