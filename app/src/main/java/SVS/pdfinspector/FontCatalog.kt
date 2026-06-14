@@ -183,6 +183,7 @@ class FontCatalog(private val appContext: Context) {
             family.contains("arial") || family.contains("helvetica") -> "LiberationSans"
             family.contains("times") -> "LiberationSerif"
             family.contains("courier") -> "LiberationMono"
+            family.contains("georgia") -> "Gelasio"
             else -> null
         }
     }
@@ -291,6 +292,10 @@ class FontCatalog(private val appContext: Context) {
             "LatinModernSans-BoldItalic" to "Latin Modern Sans Bold Italic",
             "LatinModernMono-Regular" to "Latin Modern Mono",
             "LatinModernMono-Italic" to "Latin Modern Mono Italic",
+            "Gelasio-Regular" to "Gelasio",
+            "Gelasio-Bold" to "Gelasio Bold",
+            "Gelasio-Italic" to "Gelasio Italic",
+            "Gelasio-BoldItalic" to "Gelasio Bold Italic",
         )
         return defs.map { (file, label) ->
             Entry("bundled:$file", label, FontSource.BUNDLED, false) { doc ->
