@@ -52,6 +52,7 @@ fun PdfCanvas(
     editingRunId: Int?,
     textBoxColor: Color,
     onEditRun: (Int) -> Unit,
+    debugRows: List<Pair<String, String>> = emptyList(),
     fitMode: FitMode,
     onUserTransform: () -> Unit,
     onSelect: (Int?) -> Unit,
@@ -212,6 +213,7 @@ fun PdfCanvas(
                 scale = scale,
                 mem = mem,
                 tilePx = sharpTile?.let { IntSize(it.image.width, it.image.height) },
+                extraRows = debugRows,
                 modifier = Modifier.align(Alignment.TopStart),
             )
         }

@@ -205,6 +205,13 @@ class PdfDocumentViewModel : ViewModel() {
         return fontCatalog?.autoMatchFace(node.font)
     }
 
+    // For the debug overlay: which matcher step picked the run's substitute.
+    fun fontDecisionFor(id: Int): FontCatalog.MatchExplain? {
+        val node = findNode(parsed?.root ?: return null, id) ?: return null
+        if (node.kind != NodeKind.TEXT) return null
+        return fontCatalog?.explainMatch(node.font)
+    }
+
     private fun applyEditInternal(context: Context, node: DrawNode, request: EditRequest) {
         val doc = document ?: return
         val parsedPage = parsed ?: return

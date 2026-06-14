@@ -340,6 +340,20 @@ private fun Workspace(
     val scaleState = remember { mutableStateOf(1f) }
     val offsetState = remember { mutableStateOf(Offset.Zero) }
 
+    // Last font-match decision, kept for the debug overlay; refreshed on each tap.
+    var fontDebug by remember(page) { mutableStateOf<FontCatalog.MatchExplain?>(null) }
+    LaunchedEffect(editingRunId, state.fontCatalogTick) {
+        editingRunId?.let { fontDebug = viewModel.fontDecisionFor(it) }
+    }
+    val fontDebugRows: List<Pair<String, String>> = fontDebug?.let { e ->
+        buildList {
+            add("Font" to e.original)
+            add("Step" to e.step + if (e.confident) "" else " (soft)")
+            add("Pick" to (e.match ?: "-"))
+            e.detail?.let { add("Width" to it) }
+        }
+    } ?: emptyList()
+
     val canvas: @Composable (Modifier) -> Unit = { mod ->
         if (bmp != null) {
             Box(mod) {
@@ -356,6 +370,7 @@ private fun Workspace(
                     editingRunId = editingRunId,
                     textBoxColor = runBoxColor,
                     onEditRun = { id -> editingRunId = id },
+                    debugRows = fontDebugRows,
                     fitMode = fitMode,
                     onUserTransform = onUserTransform,
                     onSelect = { id -> viewModel.select(id, reveal = true) },

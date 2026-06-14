@@ -45,6 +45,7 @@ fun DebugOverlay(
     scale: Float,
     mem: MemStats,
     tilePx: IntSize? = null,
+    extraRows: List<Pair<String, String>> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
     val bmpMb = bitmap.width.toLong() * bitmap.height * 4 / (1024.0 * 1024.0)
@@ -75,6 +76,18 @@ fun DebugOverlay(
                 lineHeight = 16.sp,
                 fontFamily = FontFamily.Monospace,
             )
+        }
+        if (extraRows.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            extraRows.forEach { (label, value) ->
+                Text(
+                    text = label.padEnd(7) + value,
+                    color = Color(0xFF8AD0FF),
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
         }
         Spacer(Modifier.height(4.dp))
         Text(
