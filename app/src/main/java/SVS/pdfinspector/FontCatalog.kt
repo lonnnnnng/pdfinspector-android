@@ -185,6 +185,12 @@ class FontCatalog(private val appContext: Context) {
             family.contains("courier") -> "LiberationMono"
             family.contains("georgia") -> "Gelasio"
             family.contains("segoe") -> "Selawik"
+            family.contains("palatino") || family.contains("palladio") ||
+                family.contains("antiqua") -> "P052"
+            family.contains("bookman") -> "URWBookman"
+            family.contains("avantgarde") || family.contains("centurygothic") -> "URWGothic"
+            family.contains("schoolbook") -> "C059"
+            family.contains("chancery") -> "Z003"
             else -> null
         }
     }
@@ -230,6 +236,7 @@ class FontCatalog(private val appContext: Context) {
         when (family) {
             "LatinModernMono" -> if (italic) "Italic" else "Regular"
             "Selawik" -> if (bold) "Bold" else "Regular"
+            "Z003" -> "Regular"
             else -> when {
                 bold && italic -> "BoldItalic"
                 bold -> "Bold"
@@ -300,6 +307,23 @@ class FontCatalog(private val appContext: Context) {
             "Gelasio-BoldItalic" to "Gelasio Bold Italic",
             "Selawik-Regular" to "Selawik",
             "Selawik-Bold" to "Selawik Bold",
+            "P052-Regular" to "URW Palladio",
+            "P052-Bold" to "URW Palladio Bold",
+            "P052-Italic" to "URW Palladio Italic",
+            "P052-BoldItalic" to "URW Palladio Bold Italic",
+            "URWBookman-Regular" to "URW Bookman",
+            "URWBookman-Bold" to "URW Bookman Bold",
+            "URWBookman-Italic" to "URW Bookman Italic",
+            "URWBookman-BoldItalic" to "URW Bookman Bold Italic",
+            "URWGothic-Regular" to "URW Gothic",
+            "URWGothic-Bold" to "URW Gothic Bold",
+            "URWGothic-Italic" to "URW Gothic Italic",
+            "URWGothic-BoldItalic" to "URW Gothic Bold Italic",
+            "C059-Regular" to "Century Schoolbook",
+            "C059-Bold" to "Century Schoolbook Bold",
+            "C059-Italic" to "Century Schoolbook Italic",
+            "C059-BoldItalic" to "Century Schoolbook Bold Italic",
+            "Z003-Regular" to "URW Chancery",
         )
         return defs.map { (file, label) ->
             Entry("bundled:$file", label, FontSource.BUNDLED, false) { doc ->
