@@ -191,6 +191,8 @@ class FontCatalog(private val appContext: Context) {
             family.contains("avantgarde") || family.contains("centurygothic") -> "URWGothic"
             family.contains("schoolbook") -> "C059"
             family.contains("chancery") -> "Z003"
+            // Symbol decodes to Unicode Greek and math, which a text serif covers.
+            family == "symbol" -> "LiberationSerif"
             else -> null
         }
     }
