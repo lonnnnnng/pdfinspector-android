@@ -184,6 +184,7 @@ class FontCatalog(private val appContext: Context) {
             family.contains("times") -> "LiberationSerif"
             family.contains("courier") -> "LiberationMono"
             family.contains("georgia") -> "Gelasio"
+            family.contains("segoe") -> "Selawik"
             else -> null
         }
     }
@@ -228,6 +229,7 @@ class FontCatalog(private val appContext: Context) {
     private fun styleSuffix(family: String, bold: Boolean, italic: Boolean): String =
         when (family) {
             "LatinModernMono" -> if (italic) "Italic" else "Regular"
+            "Selawik" -> if (bold) "Bold" else "Regular"
             else -> when {
                 bold && italic -> "BoldItalic"
                 bold -> "Bold"
@@ -296,6 +298,8 @@ class FontCatalog(private val appContext: Context) {
             "Gelasio-Bold" to "Gelasio Bold",
             "Gelasio-Italic" to "Gelasio Italic",
             "Gelasio-BoldItalic" to "Gelasio Bold Italic",
+            "Selawik-Regular" to "Selawik",
+            "Selawik-Bold" to "Selawik Bold",
         )
         return defs.map { (file, label) ->
             Entry("bundled:$file", label, FontSource.BUNDLED, false) { doc ->
