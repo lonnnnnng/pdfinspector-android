@@ -392,6 +392,9 @@ private fun Workspace(
                             null -> null
                         }
                     }
+                    val fontScale = remember(er, state.fontCatalogTick) {
+                        viewModel.inlineFontScale(er)
+                    }
                     InlineTextEditor(
                         runId = er,
                         rect = rect,
@@ -400,6 +403,7 @@ private fun Workspace(
                         initial = run.text ?: "",
                         textColor = run.colorArgb?.let { Color(it) } ?: Color.Black,
                         fontFamily = fontFamily,
+                        fontScale = fontScale,
                         onCommit = { newText ->
                             editingRunId = null
                             viewModel.applyInlineText(context, er, newText)
@@ -478,6 +482,7 @@ private fun InlineTextEditor(
     initial: String,
     textColor: Color,
     fontFamily: FontFamily?,
+    fontScale: Float,
     onCommit: (String) -> Unit,
 ) {
     val density = LocalDensity.current
@@ -492,7 +497,7 @@ private fun InlineTextEditor(
     // The run box is the text's em (ascent 0.75 to descent -0.25), so the font
     // fills it and the baseline rests 75% down. Bottom aligning a naturally
     // sized field lands the glyphs on that line with no top padding or clipping.
-    val fontPx = (rect.height * scale).coerceAtLeast(14f)
+    val fontPx = (rect.height * scale * fontScale).coerceAtLeast(14f)
     val fontSp = with(density) { fontPx.toSp() }
 
     Box(

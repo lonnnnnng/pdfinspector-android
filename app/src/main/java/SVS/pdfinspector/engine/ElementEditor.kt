@@ -113,8 +113,9 @@ object ElementEditor {
         node: DrawNode,
         request: EditRequest,
         substituteFont: PDFont? = null,
+        subScale: Float = 1f,
     ): EditResult {
-        val result = rebuild(tokens, node, request, page, substituteFont)
+        val result = rebuild(tokens, node, request, page, substituteFont, subScale)
         if (result is EditResult.Applied) writeStream(document, page, result.tokens)
         return result
     }
@@ -125,10 +126,11 @@ object ElementEditor {
         request: EditRequest,
         page: PDPage,
         substituteFont: PDFont?,
+        subScale: Float,
     ): EditResult {
         val textObject = node.kind == NodeKind.TEXT && isOp(tokens.getOrNull(node.startIndex), "BT")
         val textRun = node.kind == NodeKind.TEXT && !textObject
-        if (textRun) return rebuildTextRun(tokens, node, request, page, substituteFont)
+        if (textRun) return rebuildTextRun(tokens, node, request, page, substituteFont, subScale)
 
         val wrappable = node.kind == NodeKind.PATH || node.kind == NodeKind.IMAGE || textObject
         val wantsGeom = request.dx != 0f || request.dy != 0f ||
@@ -184,6 +186,7 @@ object ElementEditor {
         request: EditRequest,
         page: PDPage,
         substituteFont: PDFont?,
+        subScale: Float,
     ): EditResult {
         val wantsColor = request.fillArgb != null
         val newText = request.newText
@@ -207,7 +210,7 @@ object ElementEditor {
             }
             if (newName != null) {
                 out.add(newName)
-                out.add(COSFloat(node.fontSize))
+                out.add(COSFloat(node.fontSize * subScale))
                 out.add(Operator.getOperator("Tf"))
             }
             for (i in node.startIndex until node.endIndex - 1) out.add(tokens[i])

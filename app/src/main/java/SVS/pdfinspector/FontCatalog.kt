@@ -24,15 +24,6 @@ class FontOption(
     val source: FontSource,
 )
 
-// Why a given substitute was chosen, surfaced in the debug overlay.
-class MatchExplain(
-    val original: String,
-    val step: String,
-    val match: String?,
-    val confident: Boolean,
-    val detail: String?,
-)
-
 // Supplies replacement fonts for text edits from three places: Liberation
 // fonts bundled in assets, the device's /system/fonts, and user imports kept
 // in filesDir. resolve embeds a chosen font into the open document; small
@@ -101,6 +92,29 @@ class FontCatalog(private val appContext: Context) {
         )
     }
 
+    // Scale for the substitute's point size so its advance widths match the
+    // original's. The matcher keeps the width profile but not absolute scale, so
+    // a nearest clone can run a few percent wide and the text grows after an
+    // edit; this pins it back. 1f for non-bundled faces or too little data.
+    fun widthScale(original: PDFont?, id: String): Float {
+        original ?: return 1f
+        if (!id.startsWith("bundled:")) return 1f
+        val cand = WIDTH_TABLE[id.removePrefix("bundled:").substringBeforeLast('-')] ?: return 1f
+        var oSum = 0f
+        var cSum = 0f
+        var n = 0
+        for (i in WIDTH_REF.indices) {
+            val w = try {
+                original.getStringWidth(WIDTH_REF[i].toString())
+            } catch (_: Exception) {
+                0f
+            }
+            if (w > 0f) { oSum += w; cSum += cand[i]; n++ }
+        }
+        if (n < 4 || cSum <= 0f) return 1f
+        return (oSum / cSum).coerceIn(0.5f, 2f)
+    }
+
     // A loadable typeface for the auto match so the inline editor can render the
     // fallback while typing, matching what the commit will embed.
     fun autoMatchFace(original: PDFont?): FaceSource? = autoMatchId(original)?.let { faceFor(it) }
@@ -125,6 +139,15 @@ class FontCatalog(private val appContext: Context) {
         class Asset(val path: String) : FaceSource()
         class FileFace(val file: File) : FaceSource()
     }
+
+    // Why a given substitute was chosen, surfaced in the debug overlay.
+    class MatchExplain(
+        val original: String,
+        val step: String,
+        val match: String?,
+        val confident: Boolean,
+        val detail: String?,
+    )
 
     private class Match(
         val id: String,

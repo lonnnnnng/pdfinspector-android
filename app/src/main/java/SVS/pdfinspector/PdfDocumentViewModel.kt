@@ -212,6 +212,15 @@ class PdfDocumentViewModel : ViewModel() {
         return fontCatalog?.explainMatch(node.font)
     }
 
+    // Width scale the inline editor applies so its preview size tracks what the
+    // commit embeds (both use the auto match for the run's own font).
+    fun inlineFontScale(id: Int): Float {
+        val node = findNode(parsed?.root ?: return 1f, id) ?: return 1f
+        val cat = fontCatalog ?: return 1f
+        val matchId = cat.autoMatchId(node.font) ?: return 1f
+        return cat.widthScale(node.font, matchId)
+    }
+
     private fun applyEditInternal(context: Context, node: DrawNode, request: EditRequest) {
         val doc = document ?: return
         val parsedPage = parsed ?: return
@@ -224,7 +233,9 @@ class PdfDocumentViewModel : ViewModel() {
                 val page = doc.getPage(pageIndex)
                 val before = ElementEditor.snapshot(page) ?: ByteArray(0)
                 val sub = resolveSubstitute(doc, node, request)
-                val r = ElementEditor.editElement(doc, page, parsedPage.tokens, node, request, sub)
+                val r = ElementEditor.editElement(
+                    doc, page, parsedPage.tokens, node, request, sub?.font, sub?.scale ?: 1f,
+                )
                 if (r is EditResult.Applied) {
                     pushUndo(pageIndex, before)
                     if (sub != null) embeddedFonts = true
@@ -256,21 +267,22 @@ class PdfDocumentViewModel : ViewModel() {
         }
     }
 
-    private fun resolveSubstitute(doc: PDDocument, node: DrawNode, request: EditRequest): PDFont? {
+    private class Substitute(val font: PDFont, val scale: Float)
+
+    // Prefer-confident policy: on a text edit with no explicit pick, swap to a
+    // precisely identified metric-compatible font even when the original could
+    // encode, so missing glyphs and unreliable embedded widths stop biting.
+    private fun resolveSubstitute(doc: PDDocument, node: DrawNode, request: EditRequest): Substitute? {
         val cat = fontCatalog ?: return null
         val id = request.fontEntryId
-        if (id != null) {
-            val realId = if (id == AUTO_FONT_ID) cat.autoMatchId(node.font) else id
-            return realId?.let { cat.resolve(doc, it) }
-        }
-        // Prefer-confident policy: on a text edit, swap to a precisely
-        // identified metric-compatible font even when the original could
-        // encode, so missing glyphs and unreliable embedded widths stop biting.
-        if (request.newText != null) {
-            val realId = cat.confidentMatchId(node.font) ?: return null
-            return cat.resolve(doc, realId)
-        }
-        return null
+        val realId = when {
+            id == AUTO_FONT_ID -> cat.autoMatchId(node.font)
+            id != null -> id
+            request.newText != null -> cat.confidentMatchId(node.font)
+            else -> null
+        } ?: return null
+        val font = cat.resolve(doc, realId) ?: return null
+        return Substitute(font, cat.widthScale(node.font, realId))
     }
 
     fun importFont(context: Context, uri: Uri) {
