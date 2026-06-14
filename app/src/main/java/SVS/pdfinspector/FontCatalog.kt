@@ -171,7 +171,7 @@ class FontCatalog(private val appContext: Context) {
             null
         }
         val bold = desc?.isForceBold == true || (desc?.fontWeight ?: 0f) >= 600f ||
-            (panose?.weight ?: 0) >= 8 ||
+            (panose?.weight ?: 0) >= 8 || (desc?.stemV ?: 0f) >= 120f ||
             listOf("bold", "black", "heavy", "semibold").any { lower.contains(it) }
         val italic = desc?.isItalic == true || (desc?.italicAngle ?: 0f) != 0f ||
             lower.contains("italic") || lower.contains("oblique")
