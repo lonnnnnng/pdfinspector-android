@@ -226,7 +226,6 @@ class FontCatalog(private val appContext: Context) {
 
     private fun styleSuffix(family: String, bold: Boolean, italic: Boolean): String =
         when (family) {
-            "LiberationMono" -> if (bold) "Bold" else "Regular"
             "LatinModernMono" -> if (italic) "Italic" else "Regular"
             else -> when {
                 bold && italic -> "BoldItalic"
@@ -272,6 +271,8 @@ class FontCatalog(private val appContext: Context) {
             "LiberationSerif-BoldItalic" to "Liberation Serif Bold Italic",
             "LiberationMono-Regular" to "Liberation Mono",
             "LiberationMono-Bold" to "Liberation Mono Bold",
+            "LiberationMono-Italic" to "Liberation Mono Italic",
+            "LiberationMono-BoldItalic" to "Liberation Mono Bold Italic",
             "Carlito-Regular" to "Carlito",
             "Carlito-Bold" to "Carlito Bold",
             "Carlito-Italic" to "Carlito Italic",
