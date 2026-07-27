@@ -14,7 +14,8 @@ import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDResources
 import com.tom_roush.pdfbox.pdmodel.common.PDStream
 import com.tom_roush.pdfbox.pdmodel.font.PDFont
-import java.io.IOException
+import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
+import kotlin.math.roundToInt
 
 // Page-space edit for one element: translate by dx,dy, scale by scaleX,scaleY
 // about the element's lower-left, recolor, and/or replace text.
@@ -44,6 +45,15 @@ sealed class EditResult {
     class TextEncodeFailed(val chars: String? = null) : EditResult()
 }
 
+class StreamEditSnapshot internal constructor(
+    val owner: StreamOwner,
+    val content: ByteArray,
+    internal val explicitResources: COSDictionary?,
+    internal val formPath: List<PDFormXObject>,
+)
+
+typealias PageEditSnapshot = StreamEditSnapshot
+
 object ElementEditor {
 
     // Drops tokens [start, end] and rewrites the page content stream. Everything
@@ -59,25 +69,87 @@ object ElementEditor {
         for (i in tokens.indices) {
             if (i < start || i > end) kept.add(tokens[i])
         }
-        writeStream(document, page, kept)
+        writeStream(
+            document,
+            page,
+            ParsedStream(StreamOwner.Page(page), kept, page.resources),
+            kept,
+        )
         return kept
     }
 
-    private fun writeStream(document: PDDocument, page: PDPage, tokens: List<Any>) {
-        val stream = PDStream(document)
-        stream.createOutputStream(COSName.FLATE_DECODE).use { out ->
-            ContentStreamWriter(out).writeTokens(tokens)
+    fun deleteNode(document: PDDocument, page: PDPage, node: DrawNode): List<Any> {
+        val parsedStream = requireNotNull(node.stream) { "Element has no content-stream owner" }
+        val kept = ArrayList<Any>(parsedStream.tokens.size)
+        for (i in parsedStream.tokens.indices) {
+            if (i < node.startIndex || i > node.endIndex) kept.add(parsedStream.tokens[i])
         }
-        commit(document, page, stream)
+        writeStream(document, page, parsedStream, kept)
+        return kept
     }
 
-    // Captures the page's current content stream so an edit can be reverted.
-    fun snapshot(page: PDPage): ByteArray? = page.contents?.use { it.readBytes() }
+    private fun writeStream(
+        document: PDDocument,
+        page: PDPage,
+        stream: ParsedStream,
+        tokens: List<Any>,
+    ) {
+        when (val owner = stream.owner) {
+            is StreamOwner.Page -> {
+                val stream = PDStream(document)
+                stream.createOutputStream(COSName.FLATE_DECODE).use { out ->
+                    ContentStreamWriter(out).writeTokens(tokens)
+                }
+                commitPage(document, owner.page, stream)
+            }
+            is StreamOwner.Form -> {
+                owner.form.cosObject.createOutputStream().use { out ->
+                    ContentStreamWriter(out).writeTokens(tokens)
+                }
+                commitForm(document, page, stream.formPath.ifEmpty { listOf(owner.form) })
+            }
+        }
+    }
 
-    fun restore(document: PDDocument, page: PDPage, content: ByteArray) {
-        val stream = PDStream(document)
-        stream.createOutputStream(COSName.FLATE_DECODE).use { out -> out.write(content) }
-        commit(document, page, stream)
+    // 同时记录实际内容流及其显式资源，Form 内字体替换也必须能够完整撤销。
+    fun snapshot(page: PDPage): PageEditSnapshot = snapshot(
+        ParsedStream(StreamOwner.Page(page), emptyList(), page.resources),
+    )
+
+    fun snapshot(stream: ParsedStream): StreamEditSnapshot = StreamEditSnapshot(
+        owner = stream.owner,
+        content = readContent(stream.owner),
+        explicitResources = ownerDictionary(stream.owner)
+            .getDictionaryObject(COSName.RESOURCES) as? COSDictionary,
+        formPath = stream.formPath,
+    )
+
+    fun snapshot(owner: StreamOwner): StreamEditSnapshot = StreamEditSnapshot(
+        owner = owner,
+        content = readContent(owner),
+        explicitResources = ownerDictionary(owner)
+            .getDictionaryObject(COSName.RESOURCES) as? COSDictionary,
+        formPath = (owner as? StreamOwner.Form)?.let { listOf(it.form) } ?: emptyList(),
+    )
+
+    fun restore(document: PDDocument, page: PDPage, snapshot: StreamEditSnapshot) {
+        // 必须通过 setter 同步 PDFBox 包装对象的资源缓存，直接改 COS 字典会继续返回旧资源。
+        setResources(snapshot.owner, snapshot.explicitResources?.let(::PDResources))
+        when (val owner = snapshot.owner) {
+            is StreamOwner.Page -> {
+                val stream = PDStream(document)
+                stream.createOutputStream(COSName.FLATE_DECODE).use { out -> out.write(snapshot.content) }
+                commitPage(document, owner.page, stream)
+            }
+            is StreamOwner.Form -> {
+                owner.form.cosObject.createOutputStream().use { out -> out.write(snapshot.content) }
+                commitForm(
+                    document,
+                    page,
+                    snapshot.formPath.ifEmpty { listOf(owner.form) },
+                )
+            }
+        }
     }
 
     // Geometry needs a q/cm/Q wrapper, illegal inside a text object, so it is
@@ -115,8 +187,27 @@ object ElementEditor {
         substituteFont: PDFont? = null,
         subScale: Float = 1f,
     ): EditResult {
-        val result = rebuild(tokens, node, request, page, substituteFont, subScale)
-        if (result is EditResult.Applied) writeStream(document, page, result.tokens)
+        val editStream = ParsedStream(StreamOwner.Page(page), tokens, page.resources)
+        val result = rebuild(tokens, node, request, editStream, substituteFont, subScale)
+        if (result is EditResult.Applied) {
+            writeStream(document, page, editStream, result.tokens)
+        }
+        return result
+    }
+
+    fun editElement(
+        document: PDDocument,
+        page: PDPage,
+        node: DrawNode,
+        request: EditRequest,
+        substituteFont: PDFont? = null,
+        subScale: Float = 1f,
+    ): EditResult {
+        val editStream = requireNotNull(node.stream) { "Element has no content-stream owner" }
+        val result = rebuild(editStream.tokens, node, request, editStream, substituteFont, subScale)
+        if (result is EditResult.Applied) {
+            writeStream(document, page, editStream, result.tokens)
+        }
         return result
     }
 
@@ -124,13 +215,15 @@ object ElementEditor {
         tokens: List<Any>,
         node: DrawNode,
         request: EditRequest,
-        page: PDPage,
+        editStream: ParsedStream,
         substituteFont: PDFont?,
         subScale: Float,
     ): EditResult {
         val textObject = node.kind == NodeKind.TEXT && isOp(tokens.getOrNull(node.startIndex), "BT")
         val textRun = node.kind == NodeKind.TEXT && !textObject
-        if (textRun) return rebuildTextRun(tokens, node, request, page, substituteFont, subScale)
+        if (textRun) {
+            return rebuildTextRun(tokens, node, request, editStream, substituteFont, subScale)
+        }
 
         val wrappable = node.kind == NodeKind.PATH || node.kind == NodeKind.IMAGE || textObject
         val wantsGeom = request.dx != 0f || request.dy != 0f ||
@@ -184,7 +277,7 @@ object ElementEditor {
         tokens: List<Any>,
         node: DrawNode,
         request: EditRequest,
-        page: PDPage,
+        editStream: ParsedStream,
         substituteFont: PDFont?,
         subScale: Float,
     ): EditResult {
@@ -203,7 +296,7 @@ object ElementEditor {
                 return EditResult.TextEncodeFailed(unsupportedChars(font, newText))
             }
             val newName = if (substituteFont != null) {
-                val res = page.resources ?: PDResources().also { page.resources = it }
+                val res = copyResourcesForFontEdit(editStream)
                 ensureFontResource(res, substituteFont)
             } else {
                 null
@@ -213,10 +306,19 @@ object ElementEditor {
                 out.add(COSFloat(node.fontSize * subScale))
                 out.add(Operator.getOperator("Tf"))
             }
-            for (i in node.startIndex until node.endIndex - 1) out.add(tokens[i])
-            out.add(COSString(bytes))
             val opName = (tokens[node.endIndex] as? Operator)?.name
-            out.add(if (opName == "TJ") Operator.getOperator("Tj") else tokens[node.endIndex])
+            if (opName == "TJ") {
+                val original = tokens.getOrNull(node.endIndex - 1) as? COSArray
+                val rebuilt = original?.let { rebuildTextArray(it, newText, font) }
+                    ?: return EditResult.TextEncodeFailed()
+                for (i in node.startIndex until node.endIndex - 1) out.add(tokens[i])
+                out.add(rebuilt)
+                out.add(tokens[node.endIndex])
+            } else {
+                for (i in node.startIndex until node.endIndex - 1) out.add(tokens[i])
+                out.add(COSString(bytes))
+                out.add(tokens[node.endIndex])
+            }
             if (newName != null && !node.fontResourceName.isNullOrBlank()) {
                 out.add(COSName.getPDFName(node.fontResourceName))
                 out.add(COSFloat(node.fontSize))
@@ -227,6 +329,77 @@ object ElementEditor {
         }
         out.addAll(tokens.subList(node.endIndex + 1, tokens.size))
         return EditResult.Applied(out)
+    }
+
+    private fun rebuildTextArray(original: COSArray, newText: String, font: PDFont): COSArray? {
+        val stringIndexes = (0 until original.size())
+            .filter { original.getObject(it) is COSString }
+        if (stringIndexes.isEmpty()) return null
+
+        val weights = stringIndexes.map {
+            (original.getObject(it) as COSString).bytes.size.coerceAtLeast(1)
+        }
+        val totalWeight = weights.sum()
+        val codePoints = newText.codePoints().toArray()
+        var stringCursor = 0
+        var codePointStart = 0
+        var cumulativeWeight = 0
+        val segments = ArrayList<ByteArray>(stringIndexes.size)
+
+        for (ignored in stringIndexes) {
+            cumulativeWeight += weights[stringCursor]
+            // 按原字符串片段的占比分配新文字，让 TJ 中的字距调整仍落在相近位置。
+            val codePointEnd = if (stringCursor == stringIndexes.lastIndex) {
+                codePoints.size
+            } else {
+                (codePoints.size * cumulativeWeight.toFloat() / totalWeight)
+                    .roundToInt()
+                    .coerceIn(codePointStart, codePoints.size)
+            }
+            val segment = String(codePoints, codePointStart, codePointEnd - codePointStart)
+            val encoded = try {
+                font.encode(segment)
+            } catch (_: Exception) {
+                return null
+            }
+            segments.add(encoded)
+            codePointStart = codePointEnd
+            stringCursor++
+        }
+
+        if (segments.all { it.isEmpty() }) {
+            return COSArray().apply { add(COSString(ByteArray(0))) }
+        }
+
+        val rebuilt = COSArray()
+        stringCursor = 0
+        for (i in 0 until original.size()) {
+            val item = original.getObject(i)
+            if (item is COSString) {
+                val encoded = segments[stringCursor++]
+                if (encoded.isNotEmpty()) rebuilt.add(COSString(encoded))
+            } else {
+                // 只保留两个有效文本片段之间的位移，空片段不能推动后续文字位置。
+                val hasTextBefore = segments.take(stringCursor).any { it.isNotEmpty() }
+                val hasTextAfter = segments.drop(stringCursor).any { it.isNotEmpty() }
+                if (hasTextBefore && hasTextAfter) rebuilt.add(original.get(i))
+            }
+        }
+        return rebuilt
+    }
+
+    private fun copyResourcesForFontEdit(stream: ParsedStream): PDResources {
+        val inherited = stream.resources
+        val copiedDictionary = if (inherited == null) {
+            COSDictionary()
+        } else {
+            COSDictionary(inherited.cosObject).apply {
+                // Font 子字典也要复制，否则向当前页添加字体仍会污染共享资源。
+                val fonts = inherited.cosObject.getDictionaryObject(COSName.FONT) as? COSDictionary
+                if (fonts != null) setItem(COSName.FONT, COSDictionary(fonts))
+            }
+        }
+        return PDResources(copiedDictionary).also { setResources(stream.owner, it) }
     }
 
     // Reuses an already-added resource when the same font is applied to several
@@ -281,16 +454,59 @@ object ElementEditor {
     // the original bytes, so flags left on across edits make changes accumulate
     // correctly. clearContentsFlag drops the superseded stream so orphaned
     // streams don't pile up in the cache.
-    private fun commit(document: PDDocument, page: PDPage, stream: PDStream) {
+    private fun commitPage(document: PDDocument, page: PDPage, stream: PDStream) {
         clearContentsFlag(page.cosObject.getDictionaryObject(COSName.CONTENTS))
         page.setContents(stream)
         stream.cosObject.setNeedToBeUpdated(true)
+        markPageChain(document, page)
+    }
+
+    private fun commitForm(
+        document: PDDocument,
+        page: PDPage,
+        formPath: List<PDFormXObject>,
+    ) {
+        // 增量 writer 把更新标记当作遍历门；页资源、每层 XObject 字典和外层
+        // Form 都必须打开，才能沿调用路径走到真正修改的共享 Form 流。
+        markResources(page.resources)
+        for (form in formPath) {
+            form.cosObject.setNeedToBeUpdated(true)
+            markResources(form.resources)
+        }
+        markPageChain(document, page)
+    }
+
+    private fun markResources(resources: PDResources?) {
+        val dictionary = resources?.cosObject ?: return
+        dictionary.setNeedToBeUpdated(true)
+        (dictionary.getDictionaryObject(COSName.XOBJECT) as? COSDictionary)
+            ?.setNeedToBeUpdated(true)
+    }
+
+    private fun markPageChain(document: PDDocument, page: PDPage) {
         var dict: COSDictionary? = page.cosObject
         while (dict != null) {
             dict.setNeedToBeUpdated(true)
             dict = dict.getDictionaryObject(COSName.PARENT) as? COSDictionary
         }
         document.documentCatalog.cosObject.setNeedToBeUpdated(true)
+    }
+
+    private fun readContent(owner: StreamOwner): ByteArray = when (owner) {
+        is StreamOwner.Page -> owner.page.contents?.use { it.readBytes() } ?: ByteArray(0)
+        is StreamOwner.Form -> owner.form.contents?.use { it.readBytes() } ?: ByteArray(0)
+    }
+
+    private fun ownerDictionary(owner: StreamOwner): COSDictionary = when (owner) {
+        is StreamOwner.Page -> owner.page.cosObject
+        is StreamOwner.Form -> owner.form.cosObject
+    }
+
+    private fun setResources(owner: StreamOwner, resources: PDResources?) {
+        when (owner) {
+            is StreamOwner.Page -> owner.page.resources = resources
+            is StreamOwner.Form -> owner.form.resources = resources
+        }
     }
 
     private fun clearContentsFlag(contents: COSBase?) {

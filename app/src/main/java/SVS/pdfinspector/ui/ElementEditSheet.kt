@@ -79,6 +79,14 @@ fun ElementEditSheet(
                 overflow = TextOverflow.Ellipsis,
             )
 
+            if (target.editsSharedForm) {
+                Text(
+                    "Editing this Form definition updates every place it is used.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+
             if (caps.canGeom) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Position", style = MaterialTheme.typography.labelLarge)
@@ -286,7 +294,11 @@ private fun buildRequest(
 }
 
 private fun fmt(v: Float): String =
-    if (v == v.toLong().toFloat()) v.toLong().toString() else String.format("%.2f", v)
+    if (v == v.toLong().toFloat()) {
+        v.toLong().toString()
+    } else {
+        String.format(java.util.Locale.US, "%.2f", v)
+    }
 
 private fun argbToHex(argb: Int): String = String.format("#%06X", argb and 0xFFFFFF)
 

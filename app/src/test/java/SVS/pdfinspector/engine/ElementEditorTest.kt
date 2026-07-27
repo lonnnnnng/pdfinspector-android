@@ -200,6 +200,95 @@ class ElementEditorTest {
         doc.close()
     }
 
+    @Test
+    fun textEditPreservesTjArraySpacing() {
+        val textArray = com.tom_roush.pdfbox.cos.COSArray().apply {
+            add(COSString("A".toByteArray(Charsets.ISO_8859_1)))
+            add(COSFloat(-120f))
+            add(COSString("B".toByteArray(Charsets.ISO_8859_1)))
+        }
+        val tokens = listOf<Any>(textArray, Operator.getOperator("TJ"))
+        val run = DrawNode(
+            id = 1, kind = NodeKind.TEXT, label = "Text", detail = "",
+            startIndex = 0, endIndex = 1, bounds = null, colorArgb = null,
+            raw = "", children = emptyList(), text = "AB",
+            font = PDType1Font.HELVETICA, fontResourceName = "F1", fontSize = 12f,
+        )
+        val doc = PDDocument()
+        val page = PDPage()
+        doc.addPage(page)
+
+        val result = ElementEditor.editElement(
+            doc, page, tokens, run, EditRequest(newText = "CD"),
+        )
+
+        assertTrue(result is EditResult.Applied)
+        val out = (result as EditResult.Applied).tokens
+        val rebuilt = out[0] as com.tom_roush.pdfbox.cos.COSArray
+        assertEquals("TJ", (out[1] as Operator).name)
+        assertEquals("C", String((rebuilt.getObject(0) as COSString).bytes, Charsets.ISO_8859_1))
+        assertEquals(-120f, (rebuilt.getObject(1) as COSFloat).floatValue(), 0f)
+        assertEquals("D", String((rebuilt.getObject(2) as COSString).bytes, Charsets.ISO_8859_1))
+        doc.close()
+    }
+
+    @Test
+    fun emptyTextRemovesTjSpacingAdjustments() {
+        val textArray = com.tom_roush.pdfbox.cos.COSArray().apply {
+            add(COSString("A".toByteArray(Charsets.ISO_8859_1)))
+            add(COSFloat(-120f))
+            add(COSString("B".toByteArray(Charsets.ISO_8859_1)))
+        }
+        val tokens = listOf<Any>(textArray, Operator.getOperator("TJ"))
+        val run = DrawNode(
+            id = 1, kind = NodeKind.TEXT, label = "Text", detail = "",
+            startIndex = 0, endIndex = 1, bounds = null, colorArgb = null,
+            raw = "", children = emptyList(), text = "AB",
+            font = PDType1Font.HELVETICA, fontResourceName = "F1", fontSize = 12f,
+        )
+        val doc = PDDocument()
+        val page = PDPage()
+        doc.addPage(page)
+
+        val result = ElementEditor.editElement(
+            doc, page, tokens, run, EditRequest(newText = ""),
+        ) as EditResult.Applied
+
+        val rebuilt = result.tokens[0] as com.tom_roush.pdfbox.cos.COSArray
+        assertEquals(1, rebuilt.size())
+        assertEquals(0, (rebuilt.getObject(0) as COSString).bytes.size)
+        doc.close()
+    }
+
+    @Test
+    fun undoFontSubstitutionRestoresPageResources() {
+        val tokens = listOf<Any>(
+            COSString("Hi".toByteArray(Charsets.ISO_8859_1)),
+            Operator.getOperator("Tj"),
+        )
+        val run = DrawNode(
+            id = 1, kind = NodeKind.TEXT, label = "Text", detail = "",
+            startIndex = 0, endIndex = 1, bounds = null, colorArgb = null,
+            raw = "", children = emptyList(), text = "Hi",
+            fontResourceName = "F1", fontSize = 12f,
+        )
+        val doc = PDDocument()
+        val page = PDPage()
+        doc.addPage(page)
+        val before = ElementEditor.snapshot(page)
+
+        val result = ElementEditor.editElement(
+            doc, page, tokens, run, EditRequest(newText = "Hello"), PDType1Font.HELVETICA,
+        )
+        assertTrue(result is EditResult.Applied)
+        assertTrue(page.cosObject.containsKey(COSName.RESOURCES))
+
+        ElementEditor.restore(doc, page, before)
+
+        assertTrue(!page.cosObject.containsKey(COSName.RESOURCES))
+        doc.close()
+    }
+
     private fun pathPdf(): ByteArray {
         val content = "1 0 0 rg\n50 50 200 100 re f\n"
         val length = content.toByteArray(Charsets.ISO_8859_1).size

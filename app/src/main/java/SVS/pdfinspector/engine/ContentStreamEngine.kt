@@ -7,6 +7,7 @@ import com.tom_roush.pdfbox.cos.COSBoolean
 import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.cos.COSNumber
+import com.tom_roush.pdfbox.cos.COSStream
 import com.tom_roush.pdfbox.cos.COSString
 import com.tom_roush.pdfbox.pdfparser.PDFStreamParser
 import com.tom_roush.pdfbox.pdmodel.PDPage
@@ -15,13 +16,43 @@ import com.tom_roush.pdfbox.pdmodel.font.PDFont
 import com.tom_roush.pdfbox.pdmodel.graphics.color.PDColorSpace
 import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
+import com.tom_roush.pdfbox.util.Matrix
 import java.io.ByteArrayInputStream
+import java.util.Collections
+import java.util.IdentityHashMap
 
 object ContentStreamEngine {
 
+    private const val MAX_FORM_DEPTH = 32
+
     fun parse(page: PDPage): ParsedPage {
         val tokens = readTokens(page)
-        return Builder(tokens, page.resources).build()
+        val pageStream = ParsedStream(StreamOwner.Page(page), tokens, page.resources)
+        val context = ParseContext()
+        val ancestors = Collections.newSetFromMap(IdentityHashMap<COSStream, Boolean>())
+        val children = Builder(
+            context = context,
+            stream = pageStream,
+            initialCtm = Affine.IDENTITY,
+            ancestorForms = ancestors,
+            depth = 0,
+        ).build()
+        val rootBounds = Bounds.empty()
+        for (child in children) child.bounds?.let(rootBounds::includeBounds)
+        val root = DrawNode(
+            id = 0,
+            kind = NodeKind.GROUP,
+            label = "Page",
+            detail = "${children.size} top-level items",
+            startIndex = 0,
+            endIndex = tokens.lastIndex,
+            bounds = if (rootBounds.isValid) rootBounds else null,
+            colorArgb = null,
+            raw = "",
+            children = children,
+            stream = pageStream,
+        )
+        return ParsedPage(pageStream, root, context.leaves)
     }
 
     private fun readTokens(page: PDPage): List<Any> {
@@ -30,14 +61,32 @@ object ContentStreamEngine {
         return ArrayList<Any>(parser.tokens)
     }
 
-    private class Builder(val tokens: List<Any>, val resources: PDResources?) {
+    private fun readTokens(form: PDFormXObject): List<Any> {
+        val parser = PDFStreamParser(form)
+        parser.parse()
+        return ArrayList<Any>(parser.tokens)
+    }
 
-        private var nextId = 1
+    private class ParseContext {
+        var nextId = 1
+        val leaves = ArrayList<DrawNode>()
+    }
+
+    private class Builder(
+        private val context: ParseContext,
+        private val stream: ParsedStream,
+        initialCtm: Affine,
+        private val ancestorForms: MutableSet<COSStream>,
+        private val depth: Int,
+    ) {
+
+        private val tokens = stream.tokens
+        private val resources = stream.resources
+
         private val rootChildren = ArrayList<DrawNode>()
-        private val leaves = ArrayList<DrawNode>()
 
         private val groupStack = ArrayDeque<GroupFrame>()
-        private val ctmStack = ArrayDeque<Affine>().apply { addLast(Affine.IDENTITY) }
+        private val ctmStack = ArrayDeque<Affine>().apply { addLast(initialCtm) }
 
         private val operands = ArrayList<COSBase>()
         private var runStart = -1
@@ -73,7 +122,7 @@ object ContentStreamEngine {
 
         private class GroupFrame(val openIndex: Int, val children: MutableList<DrawNode> = ArrayList())
 
-        fun build(): ParsedPage {
+        fun build(): List<DrawNode> {
             for (i in tokens.indices) {
                 when (val tok = tokens[i]) {
                     is Operator -> {
@@ -89,22 +138,7 @@ object ContentStreamEngine {
                 }
             }
             while (groupStack.isNotEmpty()) closeGroup(tokens.lastIndex)
-
-            val rootBounds = Bounds.empty()
-            for (c in rootChildren) c.bounds?.let { rootBounds.includeBounds(it) }
-            val root = DrawNode(
-                id = 0,
-                kind = NodeKind.GROUP,
-                label = "Page",
-                detail = "${rootChildren.size} top-level items",
-                startIndex = 0,
-                endIndex = tokens.lastIndex,
-                bounds = if (rootBounds.isValid) rootBounds else null,
-                colorArgb = null,
-                raw = "",
-                children = rootChildren,
-            )
-            return ParsedPage(tokens, root, leaves)
+            return rootChildren
         }
 
         private fun currentChildren(): MutableList<DrawNode> =
@@ -231,7 +265,7 @@ object ContentStreamEngine {
             val bounds = Bounds.empty()
             for (c in frame.children) c.bounds?.let { bounds.includeBounds(it) }
             val node = DrawNode(
-                id = nextId++,
+                id = context.nextId++,
                 kind = NodeKind.GROUP,
                 label = "Group",
                 detail = "${frame.children.size} items",
@@ -241,6 +275,7 @@ object ContentStreamEngine {
                 colorArgb = null,
                 raw = rawSlice(frame.openIndex, minOf(frame.openIndex + 1, closeIndex)),
                 children = frame.children,
+                stream = stream,
             )
             currentChildren().add(node)
         }
@@ -400,7 +435,7 @@ object ContentStreamEngine {
             val size = if (fontSize > 0f) "  ${fontSize.toInt()}pt" else ""
             textRuns.add(
                 DrawNode(
-                    id = nextId++,
+                    id = context.nextId++,
                     kind = NodeKind.TEXT,
                     label = label,
                     detail = "$op  ${(fontName + size).trim()}".trim(),
@@ -415,6 +450,7 @@ object ContentStreamEngine {
                     fontResourceName = fontName,
                     fontSize = fontSize,
                     colorSpace = fillModel,
+                    stream = stream,
                 ),
             )
         }
@@ -426,7 +462,7 @@ object ContentStreamEngine {
             val size = if (fontSize > 0f) "  ${fontSize.toInt()}pt" else ""
             addLeaf(
                 DrawNode(
-                    id = nextId++,
+                    id = context.nextId++,
                     kind = NodeKind.TEXT,
                     label = label,
                     detail = (fontName + size).trim(),
@@ -439,6 +475,7 @@ object ContentStreamEngine {
                     text = textFull.toString(),
                     ctm = ctm(),
                     colorSpace = fillModel,
+                    stream = stream,
                 ),
             )
         }
@@ -465,7 +502,7 @@ object ContentStreamEngine {
                 }
                 addLeaf(
                     DrawNode(
-                        id = nextId++,
+                        id = context.nextId++,
                         kind = NodeKind.PATH,
                         label = label,
                         detail = "${b.width.toInt()}×${b.height.toInt()}",
@@ -477,6 +514,7 @@ object ContentStreamEngine {
                         children = emptyList(),
                         ctm = ctm(),
                         colorSpace = if (stroked) strokeModel else fillModel,
+                        stream = stream,
                     ),
                 )
             }
@@ -487,34 +525,90 @@ object ContentStreamEngine {
         private fun doXObject(name: COSName?, start: Int, endIndex: Int) {
             if (name == null) return
             val n = name.name
-            var kind = NodeKind.IMAGE
-            var label = "Image"
-            var detail = n
-            var bounds = unitSquare()
             try {
                 when (val x = resources?.getXObject(name)) {
-                    is PDImageXObject -> detail = "$n  ${x.width}×${x.height}"
-                    is PDFormXObject -> {
-                        label = "Form"
-                        formBounds(x)?.let { bounds = it }
-                    }
+                    is PDImageXObject -> addLeaf(
+                        DrawNode(
+                            id = context.nextId++,
+                            kind = NodeKind.IMAGE,
+                            label = "Image",
+                            detail = "$n  ${x.width}×${x.height}",
+                            startIndex = start,
+                            endIndex = endIndex,
+                            bounds = unitSquare(),
+                            colorArgb = null,
+                            raw = rawSlice(start, endIndex),
+                            children = emptyList(),
+                            ctm = ctm(),
+                            stream = stream,
+                        ),
+                    )
+                    is PDFormXObject -> addFormNode(n, x, start, endIndex)
                     else -> {}
                 }
             } catch (_: Exception) {
             }
-            addLeaf(
+        }
+
+        private fun addFormNode(name: String, form: PDFormXObject, start: Int, endIndex: Int) {
+            val formCtm = form.matrix.toAffine().then(ctm())
+            val formCos = form.cosObject
+            var stoppedReason: String? = null
+            val children = when {
+                depth >= MAX_FORM_DEPTH -> {
+                    stoppedReason = "depth limit"
+                    emptyList()
+                }
+                formCos in ancestorForms -> {
+                    stoppedReason = "recursive reference"
+                    emptyList()
+                }
+                else -> {
+                    // Form 没有自己的 /Resources 时继承调用者；递归栈只保护当前路径，
+                    // 同一个 Form 在页面上的其他合法调用仍会生成独立节点和坐标。
+                    ancestorForms.add(formCos)
+                    try {
+                        val childTokens = readTokens(form)
+                        val childStream = ParsedStream(
+                            owner = StreamOwner.Form(form),
+                            tokens = childTokens,
+                            resources = form.resources ?: resources,
+                            formPath = stream.formPath + form,
+                        )
+                        Builder(
+                            context = context,
+                            stream = childStream,
+                            initialCtm = formCtm,
+                            ancestorForms = ancestorForms,
+                            depth = depth + 1,
+                        ).build()
+                    } finally {
+                        ancestorForms.remove(formCos)
+                    }
+                }
+            }
+            val childBounds = Bounds.empty()
+            for (child in children) child.bounds?.let(childBounds::includeBounds)
+            val bounds = formBounds(form, formCtm)
+                ?: if (childBounds.isValid) childBounds else null
+            val detail = buildString {
+                append(name).append("  ").append(children.size).append(" items")
+                stoppedReason?.let { append("  (").append(it).append(')') }
+            }
+            currentChildren().add(
                 DrawNode(
-                    id = nextId++,
-                    kind = kind,
-                    label = label,
+                    id = context.nextId++,
+                    kind = NodeKind.GROUP,
+                    label = "Form",
                     detail = detail,
                     startIndex = start,
                     endIndex = endIndex,
                     bounds = bounds,
                     colorArgb = null,
                     raw = rawSlice(start, endIndex),
-                    children = emptyList(),
+                    children = children,
                     ctm = ctm(),
+                    stream = stream,
                 ),
             )
         }
@@ -529,19 +623,18 @@ object ContentStreamEngine {
             return b
         }
 
-        private fun formBounds(form: PDFormXObject): Bounds? {
+        private fun formBounds(form: PDFormXObject, matrix: Affine): Bounds? {
             val r = form.bBox ?: return null
-            val m = ctm()
             val b = Bounds.empty()
             val xs = floatArrayOf(r.lowerLeftX, r.upperRightX)
             val ys = floatArrayOf(r.lowerLeftY, r.upperRightY)
-            for (x in xs) for (y in ys) b.include(m.mapX(x, y), m.mapY(x, y))
+            for (x in xs) for (y in ys) b.include(matrix.mapX(x, y), matrix.mapY(x, y))
             return if (b.isValid) b else null
         }
 
         private fun addLeaf(node: DrawNode) {
             currentChildren().add(node)
-            leaves.add(node)
+            context.leaves.add(node)
         }
 
         private fun appendText(text: String) {
@@ -608,7 +701,15 @@ object ContentStreamEngine {
     }
 
     private fun formatNumber(v: Float): String =
-        if (v == v.toLong().toFloat()) v.toLong().toString() else String.format("%.2f", v)
+        if (v == v.toLong().toFloat()) {
+            v.toLong().toString()
+        } else {
+            String.format(java.util.Locale.US, "%.2f", v)
+        }
+
+    private fun Matrix.toAffine(): Affine = Affine(
+        scaleX, shearY, shearX, scaleY, translateX, translateY,
+    )
 
     private fun rgb(r: Float, g: Float, b: Float): Int {
         val ri = (r * 255f).toInt().coerceIn(0, 255)

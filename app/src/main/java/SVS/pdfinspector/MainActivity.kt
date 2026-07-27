@@ -36,6 +36,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -44,6 +45,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -99,7 +101,7 @@ import SVS.pdfinspector.ui.InspectorPane
 import SVS.pdfinspector.ui.InspectorToolbar
 import SVS.pdfinspector.ui.LeafRect
 import SVS.pdfinspector.ui.PdfCanvas
-import SVS.pdfinspector.ui.ThemeSettingsSheet
+import SVS.pdfinspector.ui.SettingsScreen
 import SVS.pdfinspector.ui.theme.InspectorTheme
 import SVS.pdfinspector.ui.theme.ThemeState
 import SVS.pdfinspector.ui.theme.rememberThemeState
@@ -136,7 +138,8 @@ fun InspectorScreen(
     val context = LocalContext.current
     val view = LocalView.current
     val state = viewModel.state
-    var showSettings by remember { mutableStateOf(false) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showExitConfirmation by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(initialUri) {
         if (initialUri != null) viewModel.open(context, initialUri)
@@ -183,10 +186,19 @@ fun InspectorScreen(
         }
     }
 
-    BackHandler(enabled = state.hasDocument) {
+    BackHandler(enabled = showSettings) {
+        showSettings = false
+    }
+
+    BackHandler(enabled = !showSettings && state.hasDocument) {
         if (state.busy != null) return@BackHandler
         fullscreen = false
         viewModel.closeDocument()
+    }
+
+    // 首页已经没有更上一层页面，系统返回手势在真正结束 Activity 前必须再次确认。
+    BackHandler(enabled = !showSettings && !state.hasDocument) {
+        showExitConfirmation = true
     }
 
     val copyText = state.page
@@ -194,7 +206,12 @@ fun InspectorScreen(
         ?.takeIf { it.kind == NodeKind.TEXT }
         ?.text
 
-    if (state.hasDocument) {
+    if (showSettings) {
+        SettingsScreen(
+            theme = themeState,
+            onBack = { showSettings = false },
+        )
+    } else if (state.hasDocument) {
         Box(Modifier.fillMaxSize()) {
             Scaffold(
                 topBar = {
@@ -217,7 +234,10 @@ fun InspectorScreen(
                         onRedo = { viewModel.redo() },
                         onOpen = { pickPdf() },
                         onSave = { saveLauncher.launch("inspected.pdf") },
-                        onSettings = { showSettings = true },
+                        onSettings = {
+                            fullscreen = false
+                            showSettings = true
+                        },
                     )
                 },
             ) { inner ->
@@ -266,11 +286,7 @@ fun InspectorScreen(
         }
     }
 
-    if (showSettings) {
-        ThemeSettingsSheet(theme = themeState, onDismiss = { showSettings = false })
-    }
-
-    if (state.editingId != null) {
+    if (!showSettings && state.editingId != null) {
         val target = remember(state.editingId, state.page, state.fontCatalogTick) {
             viewModel.editTarget()
         }
@@ -282,6 +298,29 @@ fun InspectorScreen(
                 onDismiss = { viewModel.cancelEdit() },
             )
         }
+    }
+
+    if (showExitConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showExitConfirmation = false },
+            title = { Text("Exit PdfInspector?") },
+            text = { Text("Are you sure you want to exit?") },
+            dismissButton = {
+                TextButton(onClick = { showExitConfirmation = false }) {
+                    Text("Cancel")
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showExitConfirmation = false
+                        (context as? Activity)?.finish()
+                    },
+                ) {
+                    Text("Exit")
+                }
+            },
+        )
     }
 }
 
@@ -431,7 +470,7 @@ private fun Workspace(
             onToggleRaw = { viewModel.toggleRaw() },
             onToggleDock = onToggleDock,
             onToggleTransparent = onToggleTransparent,
-            onDelete = { viewModel.deleteSelected() },
+            onDelete = { viewModel.deleteSelected(context) },
             onEdit = { id -> viewModel.beginEdit(id) },
         )
     }

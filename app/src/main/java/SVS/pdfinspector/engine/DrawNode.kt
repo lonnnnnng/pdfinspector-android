@@ -1,8 +1,25 @@
 package SVS.pdfinspector.engine
 
 import com.tom_roush.pdfbox.pdmodel.font.PDFont
+import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.PDResources
+import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
 
 enum class NodeKind { GROUP, TEXT, PATH, IMAGE }
+
+// token 索引只能解释为所属内容流中的位置；Form 路径同时保留增量保存时
+// 从页面资源走到目标共享流所需的精确遍历链。
+sealed class StreamOwner {
+    class Page(val page: PDPage) : StreamOwner()
+    class Form(val form: PDFormXObject) : StreamOwner()
+}
+
+class ParsedStream(
+    val owner: StreamOwner,
+    val tokens: List<Any>,
+    val resources: PDResources?,
+    val formPath: List<PDFormXObject> = emptyList(),
+)
 
 // One node in the inspector tree, mapped to a contiguous run of content-stream
 // tokens [startIndex, endIndex] so it can be highlighted, deleted, or rewritten.
@@ -25,13 +42,16 @@ class DrawNode(
     val fontResourceName: String? = null,
     val fontSize: Float = 0f,
     val colorSpace: String? = null,
+    val stream: ParsedStream? = null,
 )
 
 class ParsedPage(
-    val tokens: List<Any>,
+    val pageStream: ParsedStream,
     val root: DrawNode,
     val leaves: List<DrawNode>,
-)
+) {
+    val tokens: List<Any> get() = pageStream.tokens
+}
 
 fun findNode(node: DrawNode, id: Int?): DrawNode? {
     if (id == null) return null

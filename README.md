@@ -9,15 +9,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/shardulvs/pdfinspector-android/releases/latest"><img src="https://img.shields.io/github/v/release/shardulvs/pdfinspector-android?style=flat-square&label=release&color=blue" alt="Release" /></a>
-  <a href="https://f-droid.org/en/packages/SVS.pdfinspector"><img src="https://img.shields.io/f-droid/v/SVS.pdfinspector?style=flat-square" alt="F-Droid" /></a>
+  <a href="https://github.com/lonnnnnng/pdfinspector-android/releases/latest"><img src="https://img.shields.io/github/v/release/lonnnnnng/pdfinspector-android?style=flat-square&label=release&color=blue" alt="Release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-orange?style=flat-square" alt="License" /></a>
   <img src="https://img.shields.io/badge/Android-8.0%2B-3ddc84?style=flat-square&logo=android&logoColor=white" alt="Android 8.0+" />
   <a href="https://github.com/sponsors/shardulvs"><img src="https://img.shields.io/badge/sponsor-%E2%9D%A4-ec6cb9?style=flat-square&logo=githubsponsors&logoColor=white" alt="Sponsor" /></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/shardulvs/pdfinspector-android/releases/latest">GitHub Releases</a>
+  <a href="https://github.com/lonnnnnng/pdfinspector-android/releases/latest">GitHub Releases</a>
 </p>
 
 ---
@@ -32,20 +31,20 @@
 - **Smooth viewing**: pan and pinch-zoom, fit to width or height, a global zoom that carries across pages, and a full-screen mode.
 - **Dockable inspector**: the inspector panel docks to the side in landscape or the bottom in portrait, resizes by dragging, and can be made transparent to see the page through it.
 - **Material You**: Material 3 design with dynamic color on Android 12+, light / dark / system themes and a choice of accent colors.
-- **Private and open**: open source, no accounts, no telemetry. No network access and no storage permission: files are opened and saved through Android's Storage Access Framework, so the app only ever touches the documents you explicitly pick.
+- **Private and open**: open source, no accounts and no telemetry. Network access is used only when you request an update check; PDFs are opened and saved through Android's Storage Access Framework, so the app only ever touches the documents you explicitly pick.
 
 ## Install
 
 | Channel | |
 |---|---|
-| [GitHub Releases](https://github.com/shardulvs/pdfinspector-android/releases/latest) | Signed APK |
+| [GitHub Releases](https://github.com/lonnnnnng/pdfinspector-android/releases/latest) | Signed APK |
 
 ## Build from source
 
 Requires **JDK 17** (the project pins Java 17):
 
 ```bash
-git clone https://github.com/shardulvs/pdfinspector-android.git
+git clone https://github.com/lonnnnnng/pdfinspector-android.git
 cd pdfinspector-android
 JAVA_HOME=/path/to/jdk-17 ./gradlew assembleDebug
 ```

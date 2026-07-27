@@ -29,7 +29,9 @@ import SVS.pdfinspector.engine.EditRequest
 import SVS.pdfinspector.engine.EditResult
 import SVS.pdfinspector.engine.ElementEditor
 import SVS.pdfinspector.engine.NodeKind
+import SVS.pdfinspector.engine.PageEditSnapshot
 import SVS.pdfinspector.engine.ParsedPage
+import SVS.pdfinspector.engine.StreamOwner
 import SVS.pdfinspector.engine.collectGroupIds
 import SVS.pdfinspector.engine.findNode
 import SVS.pdfinspector.ui.PageTransform
@@ -133,23 +135,48 @@ class PdfDocumentViewModel : ViewModel() {
         state = state.copy(showRaw = !state.showRaw)
     }
 
-    fun deleteSelected() {
+    fun deleteSelected(context: Context) {
         val doc = document ?: return
         val parsedPage = parsed ?: return
         val node = findNode(parsedPage.root, state.selectedId) ?: return
         val pageIndex = state.pageIndex
+        val editsSharedForm = node.stream?.owner is StreamOwner.Form
         viewModelScope.launch {
             state = state.copy(busy = "Deleting")
-            withContext(Dispatchers.IO) {
-                recordUndo(doc, pageIndex)
-                ElementEditor.deleteRange(
-                    doc, doc.getPage(pageIndex), parsedPage.tokens,
-                    node.startIndex, node.endIndex,
+            var mutationApplied = false
+            try {
+                val before = withContext(Dispatchers.IO) {
+                    val page = doc.getPage(pageIndex)
+                    val snapshot = ElementEditor.snapshot(
+                        requireNotNull(node.stream) { "Element has no content-stream owner" },
+                    )
+                    ElementEditor.deleteNode(doc, page, node)
+                    snapshot
+                }
+                // 只有删除成功后才登记撤销记录，避免失败操作污染历史栈。
+                pushUndo(pageIndex, before)
+                mutationApplied = true
+                state = state.copy(dirty = true, canUndo = true, canRedo = false)
+                resyncCacheAndReopen()
+                renderPage(pageIndex)
+                if (editsSharedForm) {
+                    Toast.makeText(
+                        context,
+                        "Updated every use of this Form",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "delete failed", t)
+                state = state.copy(
+                    error = t.message ?: "Failed to delete element",
+                    dirty = state.dirty || mutationApplied,
+                    canUndo = undoStack.isNotEmpty(),
+                    canRedo = redoStack.isNotEmpty(),
                 )
+            } finally {
+                state = state.copy(busy = null)
             }
-            resyncCacheAndReopen()
-            renderPage(pageIndex)
-            state = state.copy(busy = null, dirty = true, canUndo = true, canRedo = false)
         }
     }
 
@@ -164,7 +191,8 @@ class PdfDocumentViewModel : ViewModel() {
     fun editTarget(): EditTarget? {
         val parsedPage = parsed ?: return null
         val node = findNode(parsedPage.root, state.editingId ?: return null) ?: return null
-        val caps = ElementEditor.capabilities(parsedPage.tokens, node)
+        val tokens = node.stream?.tokens ?: parsedPage.tokens
+        val caps = ElementEditor.capabilities(tokens, node)
         val b = node.bounds
         return EditTarget(
             node = node,
@@ -178,6 +206,7 @@ class PdfDocumentViewModel : ViewModel() {
             text = if (caps.canText) node.text else null,
             colorSpace = node.colorSpace,
             fontOptions = if (caps.canText) fontCatalog?.options() ?: emptyList() else emptyList(),
+            editsSharedForm = node.stream?.owner is StreamOwner.Form,
         )
     }
 
@@ -193,6 +222,9 @@ class PdfDocumentViewModel : ViewModel() {
         val node = findNode(parsed?.root ?: return, id) ?: return
         if (node.kind != NodeKind.TEXT) return
         if (newText == (node.text ?: "")) return
+        if (node.stream?.owner is StreamOwner.Form) {
+            Toast.makeText(context, "This updates every use of the Form", Toast.LENGTH_SHORT).show()
+        }
         applyEditInternal(
             context, node, EditRequest(newText = newText, fontEntryId = AUTO_FONT_ID),
         )
@@ -223,51 +255,70 @@ class PdfDocumentViewModel : ViewModel() {
 
     private fun applyEditInternal(context: Context, node: DrawNode, request: EditRequest) {
         val doc = document ?: return
-        val parsedPage = parsed ?: return
+        parsed ?: return
         val pageIndex = state.pageIndex
         viewModelScope.launch {
-            // editElement is cheap and may reject; do it first so a failed edit
-            // keeps the sheet open with the user's input. Only the slow resync +
-            // render is overlaid, and the sheet closes the instant it starts.
-            val result = withContext(Dispatchers.IO) {
-                val page = doc.getPage(pageIndex)
-                val before = ElementEditor.snapshot(page) ?: ByteArray(0)
-                val sub = resolveSubstitute(doc, node, request)
-                val r = ElementEditor.editElement(
-                    doc, page, parsedPage.tokens, node, request, sub?.font, sub?.scale ?: 1f,
-                )
-                if (r is EditResult.Applied) {
-                    pushUndo(pageIndex, before)
-                    if (sub != null) embeddedFonts = true
-                }
-                r
-            }
-            when (result) {
-                is EditResult.Applied -> {
-                    state = state.copy(editingId = null, busy = "Applying edits")
-                    resyncCacheAndReopen()
-                    renderPage(pageIndex)
-                    state = state.copy(
-                        busy = null, dirty = true, canUndo = true, canRedo = false,
+            var mutationApplied = false
+            try {
+                // editElement is cheap and may reject; do it first so a failed edit
+                // keeps the sheet open with the user's input. Only the slow resync +
+                // render is overlaid, and the sheet closes the instant it starts.
+                val execution = withContext(Dispatchers.IO) {
+                    val page = doc.getPage(pageIndex)
+                    val before = ElementEditor.snapshot(
+                        requireNotNull(node.stream) { "Element has no content-stream owner" },
                     )
+                    val sub = resolveSubstitute(doc, node, request)
+                    val r = ElementEditor.editElement(
+                        doc, page, node, request, sub?.font, sub?.scale ?: 1f,
+                    )
+                    EditExecution(r, before, sub != null)
                 }
-                is EditResult.TextEncodeFailed -> {
-                    val chars = result.chars
-                    val msg = if (chars.isNullOrBlank()) {
-                        "This font cannot encode that text"
-                    } else {
-                        "This font lacks: $chars"
+                when (val result = execution.result) {
+                    is EditResult.Applied -> {
+                        pushUndo(pageIndex, execution.before)
+                        if (execution.embeddedFont) embeddedFonts = true
+                        mutationApplied = true
+                        state = state.copy(editingId = null, busy = "Applying edits")
+                        state = state.copy(dirty = true, canUndo = true, canRedo = false)
+                        resyncCacheAndReopen()
+                        renderPage(pageIndex)
                     }
-                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    is EditResult.TextEncodeFailed -> {
+                        val chars = result.chars
+                        val msg = if (chars.isNullOrBlank()) {
+                            "This font cannot encode that text"
+                        } else {
+                            "This font lacks: $chars"
+                        }
+                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    }
+                    EditResult.Degenerate ->
+                        Toast.makeText(context, "Cannot transform this element", Toast.LENGTH_SHORT).show()
+                    EditResult.NoChange -> state = state.copy(editingId = null)
                 }
-                EditResult.Degenerate ->
-                    Toast.makeText(context, "Cannot transform this element", Toast.LENGTH_SHORT).show()
-                EditResult.NoChange -> state = state.copy(editingId = null)
+            } catch (t: Throwable) {
+                Log.e(TAG, "edit failed", t)
+                state = state.copy(
+                    error = t.message ?: "Failed to apply edit",
+                    dirty = state.dirty || mutationApplied,
+                    canUndo = undoStack.isNotEmpty(),
+                    canRedo = redoStack.isNotEmpty(),
+                )
+                Toast.makeText(context, "Failed to apply edit", Toast.LENGTH_LONG).show()
+            } finally {
+                state = state.copy(busy = null)
             }
         }
     }
 
     private class Substitute(val font: PDFont, val scale: Float)
+
+    private class EditExecution(
+        val result: EditResult,
+        val before: PageEditSnapshot,
+        val embeddedFont: Boolean,
+    )
 
     // Prefer-confident policy: on a text edit with no explicit pick, swap to a
     // precisely identified metric-compatible font even when the original could
@@ -311,41 +362,51 @@ class PdfDocumentViewModel : ViewModel() {
         if (from.isEmpty()) return
         viewModelScope.launch {
             state = state.copy(busy = "Working")
-            val entry = from.removeLast()
-            historyBytes -= entry.content.size
-            val pageIndex = entry.pageIndex
-            withContext(Dispatchers.IO) {
-                val page = doc.getPage(pageIndex)
-                val current = ElementEditor.snapshot(page) ?: ByteArray(0)
-                to.addLast(EditSnapshot(pageIndex, current))
-                historyBytes += current.size
-                ElementEditor.restore(doc, page, entry.content)
+            val entry = from.last()
+            try {
+                val current = withContext(Dispatchers.IO) {
+                    val page = doc.getPage(entry.pageIndex)
+                    val snapshot = ElementEditor.snapshot(entry.content.owner)
+                    ElementEditor.restore(doc, page, entry.content)
+                    snapshot
+                }
+
+                // 页面恢复成功后再移动历史记录，失败时仍可重试同一次撤销或重做。
+                from.removeLast()
+                historyBytes -= entry.content.content.size
+                to.addLast(EditSnapshot(entry.pageIndex, current))
+                historyBytes += current.content.size
+
+                state = state.copy(
+                    pageIndex = entry.pageIndex,
+                    dirty = true,
+                    canUndo = undoStack.isNotEmpty(),
+                    canRedo = redoStack.isNotEmpty(),
+                )
+                resyncCacheAndReopen()
+                renderPage(entry.pageIndex)
+            } catch (t: Throwable) {
+                Log.e(TAG, "history step failed", t)
+                state = state.copy(
+                    error = t.message ?: "Failed to update edit history",
+                    canUndo = undoStack.isNotEmpty(),
+                    canRedo = redoStack.isNotEmpty(),
+                )
+            } finally {
+                state = state.copy(busy = null)
             }
-            resyncCacheAndReopen()
-            renderPage(pageIndex)
-            state = state.copy(
-                busy = null,
-                pageIndex = pageIndex,
-                dirty = true,
-                canUndo = undoStack.isNotEmpty(),
-                canRedo = redoStack.isNotEmpty(),
-            )
         }
     }
 
-    private fun recordUndo(doc: PDDocument, pageIndex: Int) {
-        pushUndo(pageIndex, ElementEditor.snapshot(doc.getPage(pageIndex)) ?: ByteArray(0))
-    }
-
     // Capped both ways so history never grows without bound.
-    private fun pushUndo(pageIndex: Int, content: ByteArray) {
+    private fun pushUndo(pageIndex: Int, content: PageEditSnapshot) {
         undoStack.addLast(EditSnapshot(pageIndex, content))
-        historyBytes += content.size
-        for (e in redoStack) historyBytes -= e.content.size
+        historyBytes += content.content.size
+        for (e in redoStack) historyBytes -= e.content.content.size
         redoStack.clear()
         while (undoStack.size > MAX_HISTORY || historyBytes > MAX_HISTORY_BYTES) {
             if (undoStack.size <= 1) break
-            historyBytes -= undoStack.removeFirst().content.size
+            historyBytes -= undoStack.removeFirst().content.content.size
         }
     }
 
@@ -361,7 +422,7 @@ class PdfDocumentViewModel : ViewModel() {
             state = state.copy(busy = "Saving")
             try {
                 withContext(Dispatchers.IO) {
-                    context.contentResolver.openOutputStream(uri)?.use { doc.save(it) }
+                    PdfDocumentWriter.saveCopy(doc, context.contentResolver.openOutputStream(uri, "wt"))
                 }
                 state = state.copy(dirty = false)
                 Toast.makeText(context, "Saved a copy", Toast.LENGTH_SHORT).show()
@@ -578,7 +639,7 @@ class PdfDocumentViewModel : ViewModel() {
     }
 }
 
-private class EditSnapshot(val pageIndex: Int, val content: ByteArray)
+private class EditSnapshot(val pageIndex: Int, val content: PageEditSnapshot)
 
 class EditTarget(
     val node: DrawNode,
@@ -592,6 +653,7 @@ class EditTarget(
     val text: String?,
     val colorSpace: String?,
     val fontOptions: List<FontOption> = emptyList(),
+    val editsSharedForm: Boolean = false,
 )
 
 data class PdfUiState(

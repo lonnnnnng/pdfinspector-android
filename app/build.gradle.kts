@@ -6,23 +6,40 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-// Release signing comes from a gitignored keystore.properties; absent on F-Droid.
+// 发布机优先通过环境变量注入签名信息，同时保留本地 keystore.properties 兼容方式。
 val keystorePropertiesFile = rootProject.file("keystore.properties")
-val hasReleaseSigning = keystorePropertiesFile.exists()
 val keystoreProperties = Properties().apply {
-    if (hasReleaseSigning) keystorePropertiesFile.inputStream().use { load(it) }
+    if (keystorePropertiesFile.exists()) keystorePropertiesFile.inputStream().use { load(it) }
 }
+val releaseStoreFile = System.getenv("PDFINSPECTOR_KEYSTORE_FILE")
+    ?.takeIf { it.isNotBlank() }
+    ?: keystoreProperties.getProperty("storeFile")
+val releaseStorePassword = System.getenv("PDFINSPECTOR_STORE_PASSWORD")
+    ?.takeIf { it.isNotBlank() }
+    ?: keystoreProperties.getProperty("storePassword")
+val releaseKeyAlias = System.getenv("PDFINSPECTOR_KEY_ALIAS")
+    ?.takeIf { it.isNotBlank() }
+    ?: keystoreProperties.getProperty("keyAlias")
+val releaseKeyPassword = System.getenv("PDFINSPECTOR_KEY_PASSWORD")
+    ?.takeIf { it.isNotBlank() }
+    ?: keystoreProperties.getProperty("keyPassword")
+val hasReleaseSigning = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
 
 android {
     namespace = "SVS.pdfinspector"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "SVS.pdfinspector"
+        applicationId = "com.lonnnnnng.pdfinspector"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.3.2"
+        versionCode = 10
+        versionName = "0.4.0"
     }
 
     dependenciesInfo {
@@ -33,10 +50,10 @@ android {
     signingConfigs {
         if (hasReleaseSigning) {
             create("release") {
-                storeFile = file(keystoreProperties.getProperty("storeFile"))
-                storePassword = keystoreProperties.getProperty("storePassword")
-                keyAlias = keystoreProperties.getProperty("keyAlias")
-                keyPassword = keystoreProperties.getProperty("keyPassword")
+                storeFile = file(requireNotNull(releaseStoreFile))
+                storePassword = requireNotNull(releaseStorePassword)
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
             }
         }
     }
@@ -61,6 +78,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
@@ -81,4 +99,5 @@ dependencies {
     implementation(libs.pdfbox.android)
     debugImplementation(libs.androidx.ui.tooling)
     testImplementation("junit:junit:4.13.2")
+    testImplementation(libs.json)
 }
