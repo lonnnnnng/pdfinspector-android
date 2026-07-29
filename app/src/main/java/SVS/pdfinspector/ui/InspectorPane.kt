@@ -1,19 +1,20 @@
 package SVS.pdfinspector.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -28,17 +29,26 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import compose.icons.TablerIcons
 import compose.icons.tablericons.Code
+import compose.icons.tablericons.Braces
+import compose.icons.tablericons.ChevronRight
 import compose.icons.tablericons.Droplet
 import compose.icons.tablericons.Edit
 import compose.icons.tablericons.LayoutBottombar
 import compose.icons.tablericons.LayoutSidebarRight
+import compose.icons.tablericons.LetterT
+import compose.icons.tablericons.Photo
 import compose.icons.tablericons.Trash
+import compose.icons.tablericons.VectorBeizer
 import SVS.pdfinspector.engine.DrawNode
 import SVS.pdfinspector.engine.NodeKind
 import SVS.pdfinspector.engine.ParsedPage
@@ -74,7 +84,8 @@ fun InspectorPane(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -168,20 +179,25 @@ private fun TreeRowItem(
         modifier = Modifier
             .fillMaxWidth()
             .background(background)
+            .semantics { this.selected = selected }
             .clickable { onSelect(node.id) }
-            .padding(start = (8 + row.depth * 16).dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
+            .heightIn(min = 52.dp)
+            .padding(start = (4 + row.depth * 16).dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
-            if (row.hasChildren) {
-                Text(
-                    text = if (row.expanded) "▾" else "▸",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+        if (row.hasChildren) {
+            IconButton(onClick = { onToggleExpand(node.id) }) {
+                Icon(
+                    imageVector = TablerIcons.ChevronRight,
+                    contentDescription = if (row.expanded) "Collapse group" else "Expand group",
                     modifier = Modifier
                         .size(18.dp)
-                        .clickable { onToggleExpand(node.id) },
+                        .rotate(if (row.expanded) 90f else 0f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        } else {
+            Spacer(Modifier.size(48.dp))
         }
         KindBadge(node.kind)
         Spacer(Modifier.width(8.dp))
@@ -209,14 +225,15 @@ private fun TreeRowItem(
             Spacer(Modifier.width(8.dp))
             Box(
                 Modifier
-                    .size(16.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Color(argb)),
+                    .size(18.dp)
+                    .clip(MaterialTheme.shapes.extraSmall)
+                    .background(Color(argb))
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.extraSmall)
+                    .semantics { contentDescription = "Element color ${argb.toUInt().toString(16)}" },
             )
         }
         if (selected && node.kind != NodeKind.GROUP) {
-            Spacer(Modifier.width(4.dp))
-            IconButton(onClick = { onEdit(node.id) }, modifier = Modifier.size(28.dp)) {
+            IconButton(onClick = { onEdit(node.id) }) {
                 Icon(TablerIcons.Edit, "Edit element", Modifier.size(18.dp))
             }
         }
@@ -226,19 +243,19 @@ private fun TreeRowItem(
 @Composable
 private fun KindBadge(kind: NodeKind) {
     val scheme = MaterialTheme.colorScheme
-    val (label, color) = when (kind) {
-        NodeKind.GROUP -> "{ }" to scheme.outline
-        NodeKind.TEXT -> "T" to scheme.primary
-        NodeKind.PATH -> "◑" to scheme.tertiary
-        NodeKind.IMAGE -> "▣" to scheme.secondary
+    val (icon, label, color) = when (kind) {
+        NodeKind.GROUP -> Triple(TablerIcons.Braces, "Group", scheme.outline)
+        NodeKind.TEXT -> Triple(TablerIcons.LetterT, "Text", scheme.primary)
+        NodeKind.PATH -> Triple(TablerIcons.VectorBeizer, "Path", scheme.tertiary)
+        NodeKind.IMAGE -> Triple(TablerIcons.Photo, "Image", scheme.secondary)
     }
     Box(
         modifier = Modifier
             .size(24.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .clip(MaterialTheme.shapes.small)
             .background(color.copy(alpha = 0.16f)),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = color)
+        Icon(icon, contentDescription = label, modifier = Modifier.size(16.dp), tint = color)
     }
 }

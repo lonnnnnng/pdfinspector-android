@@ -19,6 +19,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -32,11 +34,11 @@ fun InspectorDock(
     content: @Composable () -> Unit,
 ) {
     val color =
-        if (transparent) MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.80f)
+        if (transparent) MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f)
         else MaterialTheme.colorScheme.surfaceContainer
     val shape =
-        if (dock == Dock.BOTTOM) RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
-        else RoundedCornerShape(topStart = 18.dp, bottomStart = 18.dp)
+        if (dock == Dock.BOTTOM) RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
+        else RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp)
 
     if (dock == Dock.BOTTOM) {
         Column(modifier) {
@@ -45,8 +47,8 @@ fun InspectorDock(
                 modifier = Modifier.fillMaxWidth().height(sizeDp),
                 color = color,
                 shape = shape,
-                tonalElevation = 3.dp,
-                shadowElevation = 8.dp,
+                tonalElevation = 1.dp,
+                shadowElevation = 3.dp,
             ) { content() }
         }
     } else {
@@ -56,8 +58,8 @@ fun InspectorDock(
                 modifier = Modifier.width(sizeDp).fillMaxHeight(),
                 color = color,
                 shape = shape,
-                tonalElevation = 3.dp,
-                shadowElevation = 8.dp,
+                tonalElevation = 1.dp,
+                shadowElevation = 3.dp,
             ) { content() }
         }
     }
@@ -65,12 +67,13 @@ fun InspectorDock(
 
 @Composable
 private fun ResizeHandle(dock: Dock, onResizePx: (Float) -> Unit) {
-    val grip = MaterialTheme.colorScheme.outline
+    val grip = MaterialTheme.colorScheme.outlineVariant
     if (dock == Dock.BOTTOM) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(20.dp)
+                .height(40.dp)
+                .semantics { contentDescription = "Resize inspector panel" }
                 .pointerInput(Unit) {
                     detectVerticalDragGestures { change, dy ->
                         change.consume()
@@ -79,13 +82,14 @@ private fun ResizeHandle(dock: Dock, onResizePx: (Float) -> Unit) {
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Box(Modifier.size(width = 40.dp, height = 5.dp).clip(RoundedCornerShape(3.dp)).background(grip))
+            Box(Modifier.size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(grip))
         }
     } else {
         Box(
             modifier = Modifier
                 .fillMaxHeight()
-                .width(20.dp)
+                .width(40.dp)
+                .semantics { contentDescription = "Resize inspector panel" }
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures { change, dx ->
                         change.consume()
@@ -94,7 +98,7 @@ private fun ResizeHandle(dock: Dock, onResizePx: (Float) -> Unit) {
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Box(Modifier.size(width = 5.dp, height = 40.dp).clip(RoundedCornerShape(3.dp)).background(grip))
+            Box(Modifier.size(width = 4.dp, height = 36.dp).clip(RoundedCornerShape(2.dp)).background(grip))
         }
     }
 }

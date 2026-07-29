@@ -4,9 +4,9 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 
-// Neutral surfaces shared by every accent; only the accent roles are swapped in
-// per preset so the chrome stays consistent and cohesive.
+// 中性色表面保持稳定，只替换强调色角色，避免编辑器工具区因主题切换产生层级漂移。
 private val BaseLight = lightColorScheme(
     background = Color(0xFFF8F9FB),
     onBackground = Color(0xFF1A1C1E),
@@ -109,7 +109,13 @@ object Palettes {
             primaryContainer = r.primaryContainer,
             onPrimaryContainer = r.onPrimaryContainer,
             secondary = r.secondary,
+            onSecondary = if (dark) BaseDark.background else Color.White,
+            secondaryContainer = lerp(base.surface, r.secondary, if (dark) 0.24f else 0.14f),
+            onSecondaryContainer = base.onSurface,
             tertiary = r.tertiary,
+            onTertiary = if (dark) BaseDark.background else Color.White,
+            tertiaryContainer = lerp(base.surface, r.tertiary, if (dark) 0.24f else 0.14f),
+            onTertiaryContainer = base.onSurface,
             inversePrimary = r.inversePrimary,
         )
     }

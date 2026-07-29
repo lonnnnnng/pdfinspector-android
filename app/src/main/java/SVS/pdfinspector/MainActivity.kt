@@ -13,7 +13,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -35,10 +34,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -65,7 +63,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.PlatformTextStyle
@@ -85,11 +82,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import compose.icons.TablerIcons
-import compose.icons.tablericons.Bug
-import compose.icons.tablericons.Bulb
 import compose.icons.tablericons.FileText
 import compose.icons.tablericons.Folder
-import compose.icons.tablericons.Heart
 import compose.icons.tablericons.Settings
 import SVS.pdfinspector.engine.NodeKind
 import SVS.pdfinspector.engine.findNode
@@ -158,15 +152,23 @@ fun InspectorScreen(
     val landscape = configuration.screenWidthDp > configuration.screenHeightDp
     var dock by remember(landscape) { mutableStateOf(if (landscape) Dock.SIDE else Dock.BOTTOM) }
     var transparent by rememberSaveable { mutableStateOf(false) }
-    var bottomHeight by remember { mutableStateOf(300.dp) }
-    var sideWidth by remember { mutableStateOf(340.dp) }
+    val maxBottomHeight = (configuration.screenHeightDp * 0.55f).dp.coerceAtLeast(180.dp)
+    val maxSideWidth = (configuration.screenWidthDp * 0.50f).dp.coerceAtLeast(260.dp)
+    var bottomHeight by remember(configuration.screenHeightDp) {
+        mutableStateOf((configuration.screenHeightDp * 0.34f).dp.coerceIn(180.dp, maxBottomHeight))
+    }
+    var sideWidth by remember(configuration.screenWidthDp) {
+        mutableStateOf((configuration.screenWidthDp * 0.36f).dp.coerceIn(260.dp, maxSideWidth))
+    }
     val density = LocalDensity.current
     val sizeDp = if (dock == Dock.BOTTOM) bottomHeight else sideWidth
     val onResize: (Float) -> Unit = { delta ->
         if (dock == Dock.BOTTOM) {
-            bottomHeight = with(density) { (bottomHeight.toPx() - delta).toDp() }.coerceIn(140.dp, 600.dp)
+            bottomHeight = with(density) { (bottomHeight.toPx() - delta).toDp() }
+                .coerceIn(180.dp, maxBottomHeight)
         } else {
-            sideWidth = with(density) { (sideWidth.toPx() - delta).toDp() }.coerceIn(240.dp, 600.dp)
+            sideWidth = with(density) { (sideWidth.toPx() - delta).toDp() }
+                .coerceIn(260.dp, maxSideWidth)
         }
     }
 
@@ -266,24 +268,12 @@ fun InspectorScreen(
             state.busy?.let { BusyOverlay(it) }
         }
     } else {
-        Box(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                when {
-                    state.loading -> CircularProgressIndicator()
-                    state.error != null -> Text("Error: ${state.error}")
-                    else -> EmptyState(onOpen = ::pickPdf)
-                }
-            }
-            IconButton(
-                onClick = { showSettings = true },
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(8.dp),
-            ) {
-                Icon(TablerIcons.Settings, contentDescription = "Settings", modifier = Modifier.size(22.dp))
-            }
-        }
+        HomeScreen(
+            loading = state.loading,
+            error = state.error,
+            onOpen = ::pickPdf,
+            onSettings = { showSettings = true },
+        )
     }
 
     if (!showSettings && state.editingId != null) {
@@ -574,68 +564,126 @@ private fun InlineTextEditor(
     LaunchedEffect(runId) { focusRequester.requestFocus() }
 }
 
-private const val FEATURE_URL = "https://github.com/shardulvs/pdfinspector-android/issues/new?labels=enhancement"
-private const val BUG_URL = "https://github.com/shardulvs/pdfinspector-android/issues/new?labels=bug"
-private const val SPONSOR_URL = "https://github.com/sponsors/shardulvs"
+@Composable
+private fun HomeScreen(
+    loading: Boolean,
+    error: String?,
+    onOpen: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 1.dp,
+            shadowElevation = 1.dp,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .height(64.dp)
+                    .padding(start = 20.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "PDF Inspector",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onSettings) {
+                    Icon(TablerIcons.Settings, contentDescription = "Settings", modifier = Modifier.size(22.dp))
+                }
+            }
+        }
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                loading -> CircularProgressIndicator()
+                error != null -> ErrorState(message = error, onOpen = onOpen)
+                else -> EmptyState(onOpen = onOpen)
+            }
+        }
+    }
+}
 
 @Composable
 private fun EmptyState(onOpen: () -> Unit) {
-    val uriHandler = LocalUriHandler.current
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(24.dp),
+        modifier = Modifier.padding(horizontal = 28.dp, vertical = 24.dp),
     ) {
-        Icon(
-            imageVector = TablerIcons.FileText,
-            contentDescription = null,
-            modifier = Modifier.size(72.dp),
-            tint = MaterialTheme.colorScheme.primary,
-        )
-        Spacer(Modifier.height(16.dp))
-        Text("Inspect any PDF", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(6.dp))
+        Surface(
+            modifier = Modifier.size(80.dp),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.primaryContainer,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = TablerIcons.FileText,
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+        Text("Open a PDF", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(8.dp))
         Text(
-            text = "Open a document to explore its elements, select them on the page or in the tree, then move, resize, recolor, edit text or delete them.",
+            text = "Inspect and edit text, paths, and images in a document.",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.widthIn(max = 320.dp),
+        )
+        Spacer(Modifier.height(28.dp))
+        Button(onClick = onOpen) {
+            Icon(TablerIcons.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Choose PDF")
+        }
+    }
+}
+
+@Composable
+private fun ErrorState(message: String, onOpen: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(horizontal = 28.dp, vertical = 24.dp),
+    ) {
+        Surface(
+            modifier = Modifier.size(72.dp),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.errorContainer,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = TablerIcons.FileText,
+                    contentDescription = null,
+                    modifier = Modifier.size(34.dp),
+                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                )
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+        Text("Couldn't open this PDF", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = message,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
             modifier = Modifier.widthIn(max = 360.dp),
         )
-        Spacer(Modifier.height(20.dp))
-        FilledTonalButton(onClick = onOpen) {
+        Spacer(Modifier.height(24.dp))
+        Button(onClick = onOpen) {
             Icon(TablerIcons.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text("Open a PDF")
-        }
-        Spacer(Modifier.height(40.dp))
-        Text(
-            "Help make PdfInspector better",
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AssistChip(
-                onClick = { uriHandler.openUri(FEATURE_URL) },
-                label = { Text("Feature") },
-                leadingIcon = {
-                    Icon(TablerIcons.Bulb, contentDescription = null, modifier = Modifier.size(18.dp))
-                },
-            )
-            AssistChip(
-                onClick = { uriHandler.openUri(BUG_URL) },
-                label = { Text("Bug") },
-                leadingIcon = {
-                    Icon(TablerIcons.Bug, contentDescription = null, modifier = Modifier.size(18.dp))
-                },
-            )
-            AssistChip(
-                onClick = { uriHandler.openUri(SPONSOR_URL) },
-                label = { Text("Sponsor") },
-                leadingIcon = {
-                    Icon(TablerIcons.Heart, contentDescription = null, modifier = Modifier.size(18.dp))
-                },
-            )
+            Text("Choose another PDF")
         }
     }
 }

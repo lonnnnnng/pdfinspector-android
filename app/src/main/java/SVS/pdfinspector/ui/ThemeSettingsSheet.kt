@@ -10,9 +10,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.CircularProgressIndicator
@@ -30,6 +32,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,13 +46,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import compose.icons.TablerIcons
 import compose.icons.tablericons.Check
+import compose.icons.tablericons.Bug
+import compose.icons.tablericons.Bulb
 import compose.icons.tablericons.ChevronLeft
 import compose.icons.tablericons.CloudDownload
 import compose.icons.tablericons.ExternalLink
+import compose.icons.tablericons.Heart
 import compose.icons.tablericons.Refresh
 import SVS.pdfinspector.BuildConfig
 import SVS.pdfinspector.ReleaseInfo
@@ -82,6 +91,7 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             TopAppBar(
                 title = { Text("Settings") },
@@ -90,13 +100,24 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
                         Icon(TablerIcons.ChevronLeft, contentDescription = "Back")
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
             )
         },
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier.padding(innerPadding),
-            contentPadding = PaddingValues(bottom = 32.dp),
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
         ) {
+            LazyColumn(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .widthIn(max = 720.dp),
+                contentPadding = PaddingValues(bottom = 32.dp),
+            ) {
             item { SectionLabel("Appearance") }
             item {
                 Column(
@@ -148,9 +169,13 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
                         style = MaterialTheme.typography.bodyLarge,
                         modifier = Modifier.alpha(if (accentEnabled) 1f else 0.5f),
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
                         Accent.entries.forEach { accent ->
                             Swatch(
+                                label = accent.label,
                                 color = Palettes.swatch(accent),
                                 selected = theme.accent == accent,
                                 enabled = accentEnabled,
@@ -223,8 +248,57 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
                     }
                 }
             }
+                item { HorizontalDivider(Modifier.padding(top = 8.dp)) }
+                item { SectionLabel("Support") }
+                item {
+                    SupportItem(
+                        icon = TablerIcons.Bulb,
+                        title = "Request a feature",
+                        subtitle = "Suggest an improvement on GitHub",
+                        onClick = { uriHandler.openUri(FEATURE_URL) },
+                    )
+                }
+                item {
+                    SupportItem(
+                        icon = TablerIcons.Bug,
+                        title = "Report a bug",
+                        subtitle = "Open a bug report on GitHub",
+                        onClick = { uriHandler.openUri(BUG_URL) },
+                    )
+                }
+                item {
+                    SupportItem(
+                        icon = TablerIcons.Heart,
+                        title = "Sponsor the original author",
+                        subtitle = "Support the upstream PDF Inspector project",
+                        onClick = { uriHandler.openUri(SPONSOR_URL) },
+                    )
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun SupportItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    ListItem(
+        modifier = Modifier.clickable(onClick = onClick),
+        headlineContent = { Text(title) },
+        supportingContent = { Text(subtitle) },
+        leadingContent = { Icon(icon, contentDescription = null) },
+        trailingContent = {
+            Icon(
+                TablerIcons.ExternalLink,
+                contentDescription = "Open in browser",
+                modifier = Modifier.size(18.dp),
+            )
+        },
+    )
 }
 
 @Composable
@@ -264,6 +338,7 @@ private sealed interface UpdateUiState {
 
 @Composable
 private fun Swatch(
+    label: String,
     color: Color,
     selected: Boolean,
     enabled: Boolean,
@@ -277,6 +352,10 @@ private fun Swatch(
             .clip(CircleShape)
             .background(color)
             .then(if (selected) Modifier.border(3.dp, ring, CircleShape) else Modifier)
+            .semantics {
+                contentDescription = "$label accent"
+                this.selected = selected
+            }
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -289,3 +368,8 @@ private fun Swatch(
         }
     }
 }
+
+private const val FEATURE_URL =
+    "https://github.com/lonnnnnng/pdfinspector-android/issues/new?labels=enhancement"
+private const val BUG_URL = "https://github.com/lonnnnnng/pdfinspector-android/issues/new?labels=bug"
+private const val SPONSOR_URL = "https://github.com/sponsors/shardulvs"
