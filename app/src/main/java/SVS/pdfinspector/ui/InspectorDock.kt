@@ -73,7 +73,7 @@ private fun ResizeHandle(dock: Dock, onResizePx: (Float) -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(40.dp)
-                .semantics { contentDescription = "Resize inspector panel" }
+                .semantics { contentDescription = "调整检查器面板大小" }
                 .pointerInput(Unit) {
                     detectVerticalDragGestures { change, dy ->
                         change.consume()
@@ -89,7 +89,7 @@ private fun ResizeHandle(dock: Dock, onResizePx: (Float) -> Unit) {
             modifier = Modifier
                 .fillMaxHeight()
                 .width(40.dp)
-                .semantics { contentDescription = "Resize inspector panel" }
+                .semantics { contentDescription = "调整检查器面板大小" }
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures { change, dx ->
                         change.consume()

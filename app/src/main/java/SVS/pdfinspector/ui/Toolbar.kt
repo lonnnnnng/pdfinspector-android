@@ -172,7 +172,7 @@ private fun ToolbarActions(
     ) {
         if (canCopy) {
             IconButton(onClick = onCopyText) {
-                Icon(TablerIcons.Copy, "Copy text", Modifier.size(20.dp))
+                Icon(TablerIcons.Copy, "复制文本", Modifier.size(20.dp))
             }
         }
         IconButton(
@@ -180,31 +180,31 @@ private fun ToolbarActions(
             enabled = dirty,
             colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.primary),
         ) {
-            Icon(TablerIcons.DeviceFloppy, "Save a copy", Modifier.size(20.dp))
+            Icon(TablerIcons.DeviceFloppy, "保存副本", Modifier.size(20.dp))
         }
         IconButton(onClick = onOpen) {
-            Icon(TablerIcons.Folder, "Open a PDF", Modifier.size(20.dp))
+            Icon(TablerIcons.Folder, "打开 PDF", Modifier.size(20.dp))
         }
         ToolDivider()
         IconButton(onClick = onPrev, enabled = pageIndex > 0) {
-            Icon(TablerIcons.ChevronLeft, "Previous page", Modifier.size(20.dp))
+            Icon(TablerIcons.ChevronLeft, "上一页", Modifier.size(20.dp))
         }
         PageIndicator(pageIndex, pageCount)
         IconButton(onClick = onNext, enabled = pageIndex < pageCount - 1) {
-            Icon(TablerIcons.ChevronRight, "Next page", Modifier.size(20.dp))
+            Icon(TablerIcons.ChevronRight, "下一页", Modifier.size(20.dp))
         }
         ToolDivider()
         IconButton(onClick = onUndo, enabled = canUndo) {
-            Icon(TablerIcons.ArrowBackUp, "Undo", Modifier.size(20.dp))
+            Icon(TablerIcons.ArrowBackUp, "撤销", Modifier.size(20.dp))
         }
         IconButton(onClick = onRedo, enabled = canRedo) {
-            Icon(TablerIcons.ArrowForwardUp, "Redo", Modifier.size(20.dp))
+            Icon(TablerIcons.ArrowForwardUp, "重做", Modifier.size(20.dp))
         }
         ToolDivider()
         IconButton(onClick = onToggleFullscreen) {
             Icon(
                 imageVector = if (fullscreen) TablerIcons.Minimize else TablerIcons.Maximize,
-                contentDescription = if (fullscreen) "Exit full screen" else "Enter full screen",
+                contentDescription = if (fullscreen) "退出全屏" else "进入全屏",
                 modifier = Modifier.size(20.dp),
                 tint = if (fullscreen) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -212,7 +212,7 @@ private fun ToolbarActions(
         }
         FitMenuButton(onFitWidth = onFitWidth, onFitHeight = onFitHeight)
         IconButton(onClick = onSettings) {
-            Icon(TablerIcons.Settings, "Settings", Modifier.size(20.dp))
+            Icon(TablerIcons.Settings, "设置", Modifier.size(20.dp))
         }
     }
 }
@@ -245,37 +245,37 @@ private fun CompactToolbarActions(
             enabled = dirty,
             colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.primary),
         ) {
-            Icon(TablerIcons.DeviceFloppy, "Save a copy", Modifier.size(20.dp))
+            Icon(TablerIcons.DeviceFloppy, "保存副本", Modifier.size(20.dp))
         }
         IconButton(onClick = onPrev, enabled = pageIndex > 0) {
-            Icon(TablerIcons.ChevronLeft, "Previous page", Modifier.size(20.dp))
+            Icon(TablerIcons.ChevronLeft, "上一页", Modifier.size(20.dp))
         }
         PageIndicator(pageIndex, pageCount)
         IconButton(onClick = onNext, enabled = pageIndex < pageCount - 1) {
-            Icon(TablerIcons.ChevronRight, "Next page", Modifier.size(20.dp))
+            Icon(TablerIcons.ChevronRight, "下一页", Modifier.size(20.dp))
         }
         Box {
             IconButton(onClick = { expanded = true }) {
-                Icon(TablerIcons.Dots, "More actions", Modifier.size(20.dp))
+                Icon(TablerIcons.Dots, "更多操作", Modifier.size(20.dp))
             }
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 fun run(action: () -> Unit) {
                     expanded = false
                     action()
                 }
-                DropdownMenuItem(text = { Text("Open PDF") }, onClick = { run(onOpen) })
+                DropdownMenuItem(text = { Text("打开 PDF") }, onClick = { run(onOpen) })
                 if (canCopy) {
-                    DropdownMenuItem(text = { Text("Copy selected text") }, onClick = { run(onCopyText) })
+                    DropdownMenuItem(text = { Text("复制所选文本") }, onClick = { run(onCopyText) })
                 }
-                DropdownMenuItem(text = { Text("Undo") }, enabled = canUndo, onClick = { run(onUndo) })
-                DropdownMenuItem(text = { Text("Redo") }, enabled = canRedo, onClick = { run(onRedo) })
-                DropdownMenuItem(text = { Text("Fit to width") }, onClick = { run(onFitWidth) })
-                DropdownMenuItem(text = { Text("Fit to height") }, onClick = { run(onFitHeight) })
+                DropdownMenuItem(text = { Text("撤销") }, enabled = canUndo, onClick = { run(onUndo) })
+                DropdownMenuItem(text = { Text("重做") }, enabled = canRedo, onClick = { run(onRedo) })
+                DropdownMenuItem(text = { Text("适合宽度") }, onClick = { run(onFitWidth) })
+                DropdownMenuItem(text = { Text("适合高度") }, onClick = { run(onFitHeight) })
                 DropdownMenuItem(
-                    text = { Text(if (fullscreen) "Exit full screen" else "Enter full screen") },
+                    text = { Text(if (fullscreen) "退出全屏" else "进入全屏") },
                     onClick = { run(onToggleFullscreen) },
                 )
-                DropdownMenuItem(text = { Text("Settings") }, onClick = { run(onSettings) })
+                DropdownMenuItem(text = { Text("设置") }, onClick = { run(onSettings) })
             }
         }
     }
@@ -288,7 +288,7 @@ private fun PageIndicator(pageIndex: Int, pageCount: Int) {
         style = MaterialTheme.typography.labelLarge,
         modifier = Modifier
             .padding(horizontal = 4.dp)
-            .semantics { contentDescription = "Page ${pageIndex + 1} of $pageCount" },
+            .semantics { contentDescription = "第 ${pageIndex + 1} 页，共 $pageCount 页" },
     )
 }
 
@@ -297,15 +297,15 @@ private fun FitMenuButton(onFitWidth: () -> Unit, onFitHeight: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { expanded = true }) {
-            Icon(TablerIcons.AspectRatio, "Fit page", Modifier.size(20.dp))
+            Icon(TablerIcons.AspectRatio, "页面适配", Modifier.size(20.dp))
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
-                text = { Text("Fit to width") },
+                text = { Text("适合宽度") },
                 onClick = { expanded = false; onFitWidth() },
             )
             DropdownMenuItem(
-                text = { Text("Fit to height") },
+                text = { Text("适合高度") },
                 onClick = { expanded = false; onFitHeight() },
             )
         }

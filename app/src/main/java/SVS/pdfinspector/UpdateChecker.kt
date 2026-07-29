@@ -36,7 +36,14 @@ object UpdateChecker {
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (t: Throwable) {
-            UpdateCheckResult.Failed(t.message ?: "Unable to check for updates")
+            val message = t.message.orEmpty()
+            UpdateCheckResult.Failed(
+                when {
+                    message == "未找到已发布的版本" -> message
+                    message.startsWith("GitHub 返回 HTTP ") -> message
+                    else -> "无法检查更新，请检查网络连接后重试"
+                },
+            )
         }
     }
 
@@ -51,9 +58,9 @@ object UpdateChecker {
             val status = connection.responseCode
             if (status != HttpURLConnection.HTTP_OK) {
                 val message = if (status == HttpURLConnection.HTTP_NOT_FOUND) {
-                    "No published release was found"
+                    "未找到已发布的版本"
                 } else {
-                    "GitHub returned HTTP $status"
+                    "GitHub 返回 HTTP $status"
                 }
                 error(message)
             }

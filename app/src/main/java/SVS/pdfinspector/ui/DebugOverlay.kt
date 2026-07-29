@@ -52,14 +52,14 @@ fun DebugOverlay(
     val tile = tilePx?.let {
         val mb = it.width.toLong() * it.height * 4 / (1024.0 * 1024.0)
         "${it.width} x ${it.height}  %.1f MB".format(mb)
-    } ?: "off"
+    } ?: "关闭"
     val rows = listOf(
-        "RAM" to "${mem.pssMb} MB",
-        "Heap" to "${mem.heapUsedMb} / ${mem.heapMaxMb} MB",
-        "Res" to "${bitmap.width} x ${bitmap.height} px",
-        "Bitmap" to "%.1f MB".format(bmpMb),
-        "Tile" to tile,
-        "Zoom" to "%.2fx".format(scale),
+        "内存" to "${mem.pssMb} MB",
+        "堆" to "${mem.heapUsedMb} / ${mem.heapMaxMb} MB",
+        "分辨率" to "${bitmap.width} x ${bitmap.height} px",
+        "位图" to "%.1f MB".format(bmpMb),
+        "分块" to tile,
+        "缩放" to "%.2fx".format(scale),
     )
     Column(
         modifier
@@ -91,7 +91,7 @@ fun DebugOverlay(
         }
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "four-finger tap to dismiss",
+            text = "四指轻触可关闭",
             color = Color(0xFFAAAAAA),
             fontSize = 9.sp,
             fontFamily = FontFamily.Monospace,

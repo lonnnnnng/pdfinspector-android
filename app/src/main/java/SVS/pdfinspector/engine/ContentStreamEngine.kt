@@ -42,8 +42,8 @@ object ContentStreamEngine {
         val root = DrawNode(
             id = 0,
             kind = NodeKind.GROUP,
-            label = "Page",
-            detail = "${children.size} top-level items",
+            label = "页面",
+            detail = "${children.size} 个顶层元素",
             startIndex = 0,
             endIndex = tokens.lastIndex,
             bounds = if (rootBounds.isValid) rootBounds else null,
@@ -267,8 +267,8 @@ object ContentStreamEngine {
             val node = DrawNode(
                 id = context.nextId++,
                 kind = NodeKind.GROUP,
-                label = "Group",
-                detail = "${frame.children.size} items",
+                label = "分组",
+                detail = "${frame.children.size} 个元素",
                 startIndex = frame.openIndex,
                 endIndex = closeIndex,
                 bounds = if (bounds.isValid) bounds else null,
@@ -431,7 +431,7 @@ object ContentStreamEngine {
         private fun emitRun(op: String, opStart: Int, opIndex: Int) {
             if (!runBounds.isValid) return
             val preview = runText.toString().trim().take(40)
-            val label = if (preview.isEmpty()) "Text" else "Text “$preview”"
+            val label = if (preview.isEmpty()) "文本" else "文本“$preview”"
             val size = if (fontSize > 0f) "  ${fontSize.toInt()}pt" else ""
             textRuns.add(
                 DrawNode(
@@ -458,7 +458,7 @@ object ContentStreamEngine {
         private fun emitText(endIndex: Int) {
             if (!textBounds.isValid) return
             val preview = textPreview.toString().trim()
-            val label = if (preview.isEmpty()) "Text" else "Text “$preview”"
+            val label = if (preview.isEmpty()) "文本" else "文本“$preview”"
             val size = if (fontSize > 0f) "  ${fontSize.toInt()}pt" else ""
             addLeaf(
                 DrawNode(
@@ -496,9 +496,9 @@ object ContentStreamEngine {
             if (b != null && b.isValid) {
                 val stroked = op == "S" || op == "s"
                 val label = when {
-                    op == "S" || op == "s" -> "Path stroke"
-                    op.startsWith("B") || op.startsWith("b") -> "Path fill+stroke"
-                    else -> "Path fill"
+                    op == "S" || op == "s" -> "路径描边"
+                    op.startsWith("B") || op.startsWith("b") -> "路径填充与描边"
+                    else -> "路径填充"
                 }
                 addLeaf(
                     DrawNode(
@@ -531,7 +531,7 @@ object ContentStreamEngine {
                         DrawNode(
                             id = context.nextId++,
                             kind = NodeKind.IMAGE,
-                            label = "Image",
+                            label = "图像",
                             detail = "$n  ${x.width}×${x.height}",
                             startIndex = start,
                             endIndex = endIndex,
@@ -556,11 +556,11 @@ object ContentStreamEngine {
             var stoppedReason: String? = null
             val children = when {
                 depth >= MAX_FORM_DEPTH -> {
-                    stoppedReason = "depth limit"
+                    stoppedReason = "达到深度限制"
                     emptyList()
                 }
                 formCos in ancestorForms -> {
-                    stoppedReason = "recursive reference"
+                    stoppedReason = "检测到递归引用"
                     emptyList()
                 }
                 else -> {
@@ -592,14 +592,14 @@ object ContentStreamEngine {
             val bounds = formBounds(form, formCtm)
                 ?: if (childBounds.isValid) childBounds else null
             val detail = buildString {
-                append(name).append("  ").append(children.size).append(" items")
+                append(name).append("  ").append(children.size).append(" 个元素")
                 stoppedReason?.let { append("  (").append(it).append(')') }
             }
             currentChildren().add(
                 DrawNode(
                     id = context.nextId++,
                     kind = NodeKind.GROUP,
-                    label = "Form",
+                    label = "表单对象",
                     detail = detail,
                     startIndex = start,
                     endIndex = endIndex,

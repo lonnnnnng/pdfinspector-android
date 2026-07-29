@@ -235,7 +235,7 @@ fun InspectorScreen(
                         onUndo = { viewModel.undo() },
                         onRedo = { viewModel.redo() },
                         onOpen = { pickPdf() },
-                        onSave = { saveLauncher.launch("inspected.pdf") },
+                        onSave = { saveLauncher.launch("已编辑.pdf") },
                         onSettings = {
                             fullscreen = false
                             showSettings = true
@@ -293,11 +293,11 @@ fun InspectorScreen(
     if (showExitConfirmation) {
         AlertDialog(
             onDismissRequest = { showExitConfirmation = false },
-            title = { Text("Exit PdfInspector?") },
-            text = { Text("Are you sure you want to exit?") },
+            title = { Text("退出 PDF 检查器？") },
+            text = { Text("确定要退出应用吗？") },
             dismissButton = {
                 TextButton(onClick = { showExitConfirmation = false }) {
-                    Text("Cancel")
+                    Text("取消")
                 }
             },
             confirmButton = {
@@ -307,7 +307,7 @@ fun InspectorScreen(
                         (context as? Activity)?.finish()
                     },
                 ) {
-                    Text("Exit")
+                    Text("退出")
                 }
             },
         )
@@ -376,10 +376,19 @@ private fun Workspace(
     }
     val fontDebugRows: List<Pair<String, String>> = fontDebug?.let { e ->
         buildList {
-            add("Font" to e.original)
-            add("Step" to e.step + if (e.confident) "" else " (soft)")
-            add("Pick" to (e.match ?: "-"))
-            e.detail?.let { add("Width" to it) }
+            val matchStep = when (e.step) {
+                "tex" -> "TeX 字体"
+                "alias" -> "字体别名"
+                "system" -> "系统字体"
+                "width" -> "字宽特征"
+                "panose" -> "PANOSE 特征"
+                "none" -> "未匹配"
+                else -> e.step
+            }
+            add("字体" to if (e.original == "(none)") "无" else e.original)
+            add("匹配" to matchStep + if (e.confident) "" else "（低置信度）")
+            add("选择" to (e.match ?: "-"))
+            e.detail?.let { add("宽度" to it) }
         }
     } ?: emptyList()
 
@@ -586,12 +595,12 @@ private fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "PDF Inspector",
+                    "PDF 检查器",
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f),
                 )
                 IconButton(onClick = onSettings) {
-                    Icon(TablerIcons.Settings, contentDescription = "Settings", modifier = Modifier.size(22.dp))
+                    Icon(TablerIcons.Settings, contentDescription = "设置", modifier = Modifier.size(22.dp))
                 }
             }
         }
@@ -631,10 +640,10 @@ private fun EmptyState(onOpen: () -> Unit) {
             }
         }
         Spacer(Modifier.height(24.dp))
-        Text("Open a PDF", style = MaterialTheme.typography.headlineSmall)
+        Text("打开 PDF", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Inspect and edit text, paths, and images in a document.",
+            text = "检查并编辑文档中的文本、路径和图像。",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -644,7 +653,7 @@ private fun EmptyState(onOpen: () -> Unit) {
         Button(onClick = onOpen) {
             Icon(TablerIcons.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text("Choose PDF")
+            Text("选择 PDF")
         }
     }
 }
@@ -670,7 +679,7 @@ private fun ErrorState(message: String, onOpen: () -> Unit) {
             }
         }
         Spacer(Modifier.height(20.dp))
-        Text("Couldn't open this PDF", style = MaterialTheme.typography.titleLarge)
+        Text("无法打开此 PDF", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(8.dp))
         Text(
             text = message,
@@ -683,7 +692,7 @@ private fun ErrorState(message: String, onOpen: () -> Unit) {
         Button(onClick = onOpen) {
             Icon(TablerIcons.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text("Choose another PDF")
+            Text("选择其他 PDF")
         }
     }
 }

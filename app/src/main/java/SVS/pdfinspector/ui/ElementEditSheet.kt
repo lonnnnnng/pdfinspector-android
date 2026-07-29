@@ -81,7 +81,7 @@ fun ElementEditSheet(
 
             if (target.editsSharedForm) {
                 Text(
-                    "Editing this Form definition updates every place it is used.",
+                    "编辑此表单对象会同步更新所有引用位置。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -89,20 +89,20 @@ fun ElementEditSheet(
 
             if (caps.canGeom) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Position", style = MaterialTheme.typography.labelLarge)
+                    Text("位置", style = MaterialTheme.typography.labelLarge)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         NumberField("X", x, { x = it }, Modifier.weight(1f))
                         NumberField("Y", y, { y = it }, Modifier.weight(1f))
                     }
                     Text(
-                        "PDF points, origin bottom-left",
+                        "单位为 PDF 点，原点位于左下角",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text("Size", style = MaterialTheme.typography.labelLarge)
+                    Text("尺寸", style = MaterialTheme.typography.labelLarge)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        NumberField("W", w, { w = it }, Modifier.weight(1f))
-                        NumberField("H", h, { h = it }, Modifier.weight(1f))
+                        NumberField("宽", w, { w = it }, Modifier.weight(1f))
+                        NumberField("高", h, { h = it }, Modifier.weight(1f))
                     }
                 }
             }
@@ -111,7 +111,7 @@ fun ElementEditSheet(
                 OutlinedTextField(
                     value = fill,
                     onValueChange = { fill = it },
-                    label = { Text("Fill color  #RRGGBB") },
+                    label = { Text("填充颜色  #RRGGBB") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                     modifier = Modifier.fillMaxWidth(),
@@ -121,7 +121,7 @@ fun ElementEditSheet(
                 OutlinedTextField(
                     value = stroke,
                     onValueChange = { stroke = it },
-                    label = { Text("Stroke color  #RRGGBB") },
+                    label = { Text("描边颜色  #RRGGBB") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                     modifier = Modifier.fillMaxWidth(),
@@ -131,7 +131,7 @@ fun ElementEditSheet(
             val cs = target.colorSpace
             if ((caps.canFill || caps.canStroke) && cs != null && cs != "RGB") {
                 Text(
-                    "Color space: $cs. Editing saves it as RGB.",
+                    "色彩空间：${localizedColorSpace(cs)}。编辑后将以 RGB 保存。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -141,7 +141,7 @@ fun ElementEditSheet(
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
-                    label = { Text("Text") },
+                    label = { Text("文本") },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -152,7 +152,7 @@ fun ElementEditSheet(
                             if (on && fontId == null) fontId = AUTO_FONT_ID
                         },
                     )
-                    Text("Use fallback font")
+                    Text("使用备用字体")
                 }
                 if (useFallback) {
                     FontPicker(
@@ -164,11 +164,9 @@ fun ElementEditSheet(
                 }
                 Text(
                     if (useFallback) {
-                        "Auto picks the closest match to the original font. Pick " +
-                            "another or add your own from the list."
+                        "自动选择与原字体最接近的字体，也可以从列表中选择或添加自定义字体。"
                     } else {
-                        "Re-encoded with the element's own font, swapping to an " +
-                            "exact match only when one is recognised."
+                        "使用元素原字体重新编码，仅在识别到完全匹配的字体时自动替换。"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -179,7 +177,7 @@ fun ElementEditSheet(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
             ) {
-                TextButton(onClick = onDismiss) { Text("Cancel") }
+                TextButton(onClick = onDismiss) { Text("取消") }
                 Button(onClick = {
                     onApply(
                         buildRequest(
@@ -187,7 +185,7 @@ fun ElementEditSheet(
                             if (useFallback) fontId ?: AUTO_FONT_ID else null,
                         ),
                     )
-                }) { Text("Apply") }
+                }) { Text("应用") }
             }
         }
     }
@@ -220,16 +218,16 @@ private fun FontPicker(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val label = if (selectedId == AUTO_FONT_ID) {
-        "Auto (match original)"
+        "自动（匹配原字体）"
     } else {
-        options.firstOrNull { it.id == selectedId }?.let(::fontLabel) ?: "Auto (match original)"
+        options.firstOrNull { it.id == selectedId }?.let(::fontLabel) ?: "自动（匹配原字体）"
     }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
         OutlinedTextField(
             value = label,
             onValueChange = {},
             readOnly = true,
-            label = { Text("Fallback font") },
+            label = { Text("备用字体") },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier
                 .menuAnchor(MenuAnchorType.PrimaryNotEditable)
@@ -237,7 +235,7 @@ private fun FontPicker(
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
-                text = { Text("Auto (match original)") },
+                text = { Text("自动（匹配原字体）") },
                 onClick = { onSelect(AUTO_FONT_ID); expanded = false },
             )
             options.forEach { opt ->
@@ -248,7 +246,7 @@ private fun FontPicker(
             }
             HorizontalDivider()
             DropdownMenuItem(
-                text = { Text("Add custom font") },
+                text = { Text("添加自定义字体") },
                 onClick = { expanded = false; onAddCustom() },
             )
         }
@@ -256,9 +254,17 @@ private fun FontPicker(
 }
 
 private fun fontLabel(o: FontOption): String = when (o.source) {
-    FontSource.SYSTEM -> "${o.displayName} (system)"
-    FontSource.CUSTOM -> "${o.displayName} (custom)"
+    FontSource.SYSTEM -> "${o.displayName}（系统）"
+    FontSource.CUSTOM -> "${o.displayName}（自定义）"
     FontSource.BUNDLED -> o.displayName
+}
+
+private fun localizedColorSpace(value: String): String = when {
+    value == "Gray" -> "灰度"
+    value == "Pattern" -> "图案"
+    value == "Color space" -> "未知色彩空间"
+    value.startsWith("Separation") -> value.replaceFirst("Separation", "专色")
+    else -> value
 }
 
 private fun buildRequest(

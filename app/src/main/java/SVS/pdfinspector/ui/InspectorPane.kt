@@ -90,14 +90,14 @@ fun InspectorPane(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    "Inspector",
+                    "元素检查器",
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     softWrap = false,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "${page.leaves.size} elements",
+                    "${page.leaves.size} 个元素",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -106,17 +106,17 @@ fun InspectorPane(
                 )
             }
             IconToggleButton(checked = showRaw, onCheckedChange = { onToggleRaw() }) {
-                Icon(TablerIcons.Code, "Toggle raw operators", Modifier.size(20.dp))
+                Icon(TablerIcons.Code, "切换原始运算符", Modifier.size(20.dp))
             }
             IconButton(onClick = onToggleDock) {
                 Icon(
                     imageVector = if (dock == Dock.BOTTOM) TablerIcons.LayoutSidebarRight else TablerIcons.LayoutBottombar,
-                    contentDescription = "Dock side or bottom",
+                    contentDescription = "切换面板停靠位置",
                     modifier = Modifier.size(20.dp),
                 )
             }
             IconToggleButton(checked = transparent, onCheckedChange = { onToggleTransparent() }) {
-                Icon(TablerIcons.Droplet, "Toggle transparency", Modifier.size(20.dp))
+                Icon(TablerIcons.Droplet, "切换透明模式", Modifier.size(20.dp))
             }
             FilledTonalIconButton(
                 onClick = onDelete,
@@ -126,7 +126,7 @@ fun InspectorPane(
                     contentColor = MaterialTheme.colorScheme.onErrorContainer,
                 ),
             ) {
-                Icon(TablerIcons.Trash, "Delete element", Modifier.size(20.dp))
+                Icon(TablerIcons.Trash, "删除元素", Modifier.size(20.dp))
             }
         }
         HorizontalDivider()
@@ -189,7 +189,7 @@ private fun TreeRowItem(
             IconButton(onClick = { onToggleExpand(node.id) }) {
                 Icon(
                     imageVector = TablerIcons.ChevronRight,
-                    contentDescription = if (row.expanded) "Collapse group" else "Expand group",
+                    contentDescription = if (row.expanded) "收起分组" else "展开分组",
                     modifier = Modifier
                         .size(18.dp)
                         .rotate(if (row.expanded) 90f else 0f),
@@ -229,12 +229,12 @@ private fun TreeRowItem(
                     .clip(MaterialTheme.shapes.extraSmall)
                     .background(Color(argb))
                     .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.extraSmall)
-                    .semantics { contentDescription = "Element color ${argb.toUInt().toString(16)}" },
+                    .semantics { contentDescription = "元素颜色 ${argb.toUInt().toString(16)}" },
             )
         }
         if (selected && node.kind != NodeKind.GROUP) {
             IconButton(onClick = { onEdit(node.id) }) {
-                Icon(TablerIcons.Edit, "Edit element", Modifier.size(18.dp))
+                Icon(TablerIcons.Edit, "编辑元素", Modifier.size(18.dp))
             }
         }
     }
@@ -244,10 +244,10 @@ private fun TreeRowItem(
 private fun KindBadge(kind: NodeKind) {
     val scheme = MaterialTheme.colorScheme
     val (icon, label, color) = when (kind) {
-        NodeKind.GROUP -> Triple(TablerIcons.Braces, "Group", scheme.outline)
-        NodeKind.TEXT -> Triple(TablerIcons.LetterT, "Text", scheme.primary)
-        NodeKind.PATH -> Triple(TablerIcons.VectorBeizer, "Path", scheme.tertiary)
-        NodeKind.IMAGE -> Triple(TablerIcons.Photo, "Image", scheme.secondary)
+        NodeKind.GROUP -> Triple(TablerIcons.Braces, "分组", scheme.outline)
+        NodeKind.TEXT -> Triple(TablerIcons.LetterT, "文本", scheme.primary)
+        NodeKind.PATH -> Triple(TablerIcons.VectorBeizer, "路径", scheme.tertiary)
+        NodeKind.IMAGE -> Triple(TablerIcons.Photo, "图像", scheme.secondary)
     }
     Box(
         modifier = Modifier

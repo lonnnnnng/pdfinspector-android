@@ -69,7 +69,7 @@ class PdfDocumentViewModel : ViewModel() {
             try {
                 val loaded = withContext(Dispatchers.IO) {
                     val bytes = context.contentResolver.openInputStream(uri).use { input ->
-                        requireNotNull(input) { "Cannot open the selected file" }.readBytes()
+                        requireNotNull(input) { "无法打开所选文件" }.readBytes()
                     }
                     val file = File(context.cacheDir, "working.pdf")
                     file.writeBytes(bytes)
@@ -96,7 +96,7 @@ class PdfDocumentViewModel : ViewModel() {
                 )
             } catch (t: Throwable) {
                 Log.e(TAG, "open failed", t)
-                state = state.copy(loading = false, error = t.message ?: "Failed to open PDF")
+                state = state.copy(loading = false, error = "无法打开 PDF 文件")
             }
         }
     }
@@ -105,7 +105,7 @@ class PdfDocumentViewModel : ViewModel() {
         val doc = document ?: return
         if (index < 0 || index >= doc.numberOfPages || index == state.pageIndex) return
         viewModelScope.launch {
-            state = state.copy(busy = "Loading page")
+            state = state.copy(busy = "正在加载页面")
             renderPage(index)
             state = state.copy(busy = null, pageIndex = index)
         }
@@ -122,8 +122,8 @@ class PdfDocumentViewModel : ViewModel() {
         val node = findNode(parsed?.root ?: return, state.selectedId) ?: return
         val text = node.text ?: return
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("PDF text", text))
-        Toast.makeText(context, "Copied text", Toast.LENGTH_SHORT).show()
+        clipboard.setPrimaryClip(ClipData.newPlainText("PDF 文本", text))
+        Toast.makeText(context, "已复制文本", Toast.LENGTH_SHORT).show()
     }
 
     fun toggleExpand(id: Int) {
@@ -142,7 +142,7 @@ class PdfDocumentViewModel : ViewModel() {
         val pageIndex = state.pageIndex
         val editsSharedForm = node.stream?.owner is StreamOwner.Form
         viewModelScope.launch {
-            state = state.copy(busy = "Deleting")
+            state = state.copy(busy = "正在删除")
             var mutationApplied = false
             try {
                 val before = withContext(Dispatchers.IO) {
@@ -162,14 +162,14 @@ class PdfDocumentViewModel : ViewModel() {
                 if (editsSharedForm) {
                     Toast.makeText(
                         context,
-                        "Updated every use of this Form",
+                        "已更新此表单对象的所有引用位置",
                         Toast.LENGTH_SHORT,
                     ).show()
                 }
             } catch (t: Throwable) {
                 Log.e(TAG, "delete failed", t)
                 state = state.copy(
-                    error = t.message ?: "Failed to delete element",
+                    error = "删除元素失败",
                     dirty = state.dirty || mutationApplied,
                     canUndo = undoStack.isNotEmpty(),
                     canRedo = redoStack.isNotEmpty(),
@@ -223,7 +223,7 @@ class PdfDocumentViewModel : ViewModel() {
         if (node.kind != NodeKind.TEXT) return
         if (newText == (node.text ?: "")) return
         if (node.stream?.owner is StreamOwner.Form) {
-            Toast.makeText(context, "This updates every use of the Form", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "此操作会更新表单对象的所有引用位置", Toast.LENGTH_SHORT).show()
         }
         applyEditInternal(
             context, node, EditRequest(newText = newText, fontEntryId = AUTO_FONT_ID),
@@ -279,7 +279,7 @@ class PdfDocumentViewModel : ViewModel() {
                         pushUndo(pageIndex, execution.before)
                         if (execution.embeddedFont) embeddedFonts = true
                         mutationApplied = true
-                        state = state.copy(editingId = null, busy = "Applying edits")
+                        state = state.copy(editingId = null, busy = "正在应用编辑")
                         state = state.copy(dirty = true, canUndo = true, canRedo = false)
                         resyncCacheAndReopen()
                         renderPage(pageIndex)
@@ -287,25 +287,25 @@ class PdfDocumentViewModel : ViewModel() {
                     is EditResult.TextEncodeFailed -> {
                         val chars = result.chars
                         val msg = if (chars.isNullOrBlank()) {
-                            "This font cannot encode that text"
+                            "此字体无法编码输入的文本"
                         } else {
-                            "This font lacks: $chars"
+                            "此字体缺少以下字符：$chars"
                         }
                         Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                     }
                     EditResult.Degenerate ->
-                        Toast.makeText(context, "Cannot transform this element", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "无法变换此元素", Toast.LENGTH_SHORT).show()
                     EditResult.NoChange -> state = state.copy(editingId = null)
                 }
             } catch (t: Throwable) {
                 Log.e(TAG, "edit failed", t)
                 state = state.copy(
-                    error = t.message ?: "Failed to apply edit",
+                    error = "应用编辑失败",
                     dirty = state.dirty || mutationApplied,
                     canUndo = undoStack.isNotEmpty(),
                     canRedo = redoStack.isNotEmpty(),
                 )
-                Toast.makeText(context, "Failed to apply edit", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "应用编辑失败", Toast.LENGTH_LONG).show()
             } finally {
                 state = state.copy(busy = null)
             }
@@ -339,16 +339,16 @@ class PdfDocumentViewModel : ViewModel() {
     fun importFont(context: Context, uri: Uri) {
         val cat = fontCatalog
         if (cat == null) {
-            Toast.makeText(context, "Open a document first", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "请先打开文档", Toast.LENGTH_SHORT).show()
             return
         }
         viewModelScope.launch {
             val ok = withContext(Dispatchers.IO) { cat.importFont(uri) }
             if (ok) {
                 state = state.copy(fontCatalogTick = state.fontCatalogTick + 1)
-                Toast.makeText(context, "Font added", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "字体已添加", Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(context, "Could not import that font", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "无法导入此字体", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -361,7 +361,7 @@ class PdfDocumentViewModel : ViewModel() {
         val doc = document ?: return
         if (from.isEmpty()) return
         viewModelScope.launch {
-            state = state.copy(busy = "Working")
+            state = state.copy(busy = "正在处理")
             val entry = from.last()
             try {
                 val current = withContext(Dispatchers.IO) {
@@ -388,7 +388,7 @@ class PdfDocumentViewModel : ViewModel() {
             } catch (t: Throwable) {
                 Log.e(TAG, "history step failed", t)
                 state = state.copy(
-                    error = t.message ?: "Failed to update edit history",
+                    error = "更新编辑历史失败",
                     canUndo = undoStack.isNotEmpty(),
                     canRedo = redoStack.isNotEmpty(),
                 )
@@ -419,16 +419,16 @@ class PdfDocumentViewModel : ViewModel() {
     fun saveCopy(context: Context, uri: Uri) {
         val doc = document ?: return
         viewModelScope.launch {
-            state = state.copy(busy = "Saving")
+            state = state.copy(busy = "正在保存")
             try {
                 withContext(Dispatchers.IO) {
                     PdfDocumentWriter.saveCopy(doc, context.contentResolver.openOutputStream(uri, "wt"))
                 }
                 state = state.copy(dirty = false)
-                Toast.makeText(context, "Saved a copy", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "副本已保存", Toast.LENGTH_SHORT).show()
             } catch (t: Throwable) {
                 Log.e(TAG, "save failed", t)
-                Toast.makeText(context, "Failed to save", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "保存失败", Toast.LENGTH_LONG).show()
             } finally {
                 state = state.copy(busy = null)
             }
@@ -480,7 +480,7 @@ class PdfDocumentViewModel : ViewModel() {
             )
         } catch (t: Throwable) {
             Log.e(TAG, "render failed page=$index", t)
-            state = state.copy(error = t.message ?: "Failed to render page")
+            state = state.copy(error = "渲染页面失败")
         }
     }
 
@@ -619,7 +619,7 @@ class PdfDocumentViewModel : ViewModel() {
             context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
                 ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
         }.getOrNull()
-        return fromResolver ?: uri.lastPathSegment?.substringAfterLast('/') ?: "document.pdf"
+        return fromResolver ?: uri.lastPathSegment?.substringAfterLast('/') ?: "文档.pdf"
     }
 
     override fun onCleared() {

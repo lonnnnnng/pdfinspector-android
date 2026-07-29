@@ -9,14 +9,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 
-enum class ThemeMode(val label: String) { SYSTEM("Follow system"), LIGHT("Light"), DARK("Dark") }
+enum class ThemeMode(val label: String) { SYSTEM("跟随系统"), LIGHT("浅色"), DARK("深色") }
 
 enum class Accent(val label: String) {
-    TEAL("Teal"),
-    BLUE("Blue"),
-    VIOLET("Violet"),
-    GREEN("Green"),
-    AMBER("Amber"),
+    TEAL("青色"),
+    BLUE("蓝色"),
+    VIOLET("紫色"),
+    GREEN("绿色"),
+    AMBER("琥珀色"),
 }
 
 class ThemeState(

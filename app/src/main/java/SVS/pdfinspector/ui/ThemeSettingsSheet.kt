@@ -94,10 +94,10 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             TopAppBar(
-                title = { Text("Settings") },
+                title = { Text("设置") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(TablerIcons.ChevronLeft, contentDescription = "Back")
+                        Icon(TablerIcons.ChevronLeft, contentDescription = "返回")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -118,7 +118,7 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
                     .widthIn(max = 720.dp),
                 contentPadding = PaddingValues(bottom = 32.dp),
             ) {
-            item { SectionLabel("Appearance") }
+            item { SectionLabel("外观") }
             item {
                 Column(
                     modifier = Modifier
@@ -126,7 +126,7 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
                         .padding(horizontal = 20.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text("Theme", style = MaterialTheme.typography.bodyLarge)
+                    Text("主题", style = MaterialTheme.typography.bodyLarge)
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                         val modes = ThemeMode.entries
                         modes.forEachIndexed { index, mode ->
@@ -144,8 +144,8 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
             if (dynamicAvailable) {
                 item {
                     ListItem(
-                        headlineContent = { Text("Dynamic color") },
-                        supportingContent = { Text("Match colors to your wallpaper") },
+                        headlineContent = { Text("动态配色") },
+                        supportingContent = { Text("跟随系统壁纸配色") },
                         trailingContent = {
                             Switch(
                                 checked = theme.dynamic,
@@ -165,7 +165,7 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
-                        "Accent",
+                        "强调色",
                         style = MaterialTheme.typography.bodyLarge,
                         modifier = Modifier.alpha(if (accentEnabled) 1f else 0.5f),
                     )
@@ -185,7 +185,7 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
                     }
                     if (!accentEnabled) {
                         Text(
-                            "Turn off dynamic color to pick an accent.",
+                            "关闭动态配色后可以选择强调色。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -194,11 +194,11 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
             }
 
             item { HorizontalDivider(Modifier.padding(top = 8.dp)) }
-            item { SectionLabel("Updates") }
+            item { SectionLabel("更新") }
             item {
                 ListItem(
                     modifier = Modifier.clickable(enabled = !checking, onClick = checkUpdates),
-                    headlineContent = { Text("Check for updates") },
+                    headlineContent = { Text("检查更新") },
                     supportingContent = { UpdateStatus(updateState) },
                     leadingContent = {
                         Icon(TablerIcons.CloudDownload, contentDescription = null)
@@ -208,7 +208,7 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
                             CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
                         } else {
                             IconButton(onClick = checkUpdates) {
-                                Icon(TablerIcons.Refresh, contentDescription = "Check now")
+                                Icon(TablerIcons.Refresh, contentDescription = "立即检查")
                             }
                         }
                     },
@@ -224,8 +224,12 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
                             .padding(horizontal = 20.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Text(available.release.name, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "版本 ${available.release.tagName}",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
                         if (available.release.notes.isNotBlank()) {
+                            Text("版本说明", style = MaterialTheme.typography.labelLarge)
                             Text(
                                 available.release.notes,
                                 style = MaterialTheme.typography.bodyMedium,
@@ -243,34 +247,34 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
                         ) {
                             Icon(TablerIcons.ExternalLink, contentDescription = null)
                             Spacer(Modifier.size(8.dp))
-                            Text(if (available.release.downloadUrl != null) "Download APK" else "View release")
+                            Text(if (available.release.downloadUrl != null) "下载 APK" else "查看版本")
                         }
                     }
                 }
             }
                 item { HorizontalDivider(Modifier.padding(top = 8.dp)) }
-                item { SectionLabel("Support") }
+                item { SectionLabel("支持与反馈") }
                 item {
                     SupportItem(
                         icon = TablerIcons.Bulb,
-                        title = "Request a feature",
-                        subtitle = "Suggest an improvement on GitHub",
+                        title = "功能建议",
+                        subtitle = "在 GitHub 上提交改进建议",
                         onClick = { uriHandler.openUri(FEATURE_URL) },
                     )
                 }
                 item {
                     SupportItem(
                         icon = TablerIcons.Bug,
-                        title = "Report a bug",
-                        subtitle = "Open a bug report on GitHub",
+                        title = "问题反馈",
+                        subtitle = "在 GitHub 上提交问题报告",
                         onClick = { uriHandler.openUri(BUG_URL) },
                     )
                 }
                 item {
                     SupportItem(
                         icon = TablerIcons.Heart,
-                        title = "Sponsor the original author",
-                        subtitle = "Support the upstream PDF Inspector project",
+                        title = "赞助原作者",
+                        subtitle = "支持上游 PDF Inspector 项目",
                         onClick = { uriHandler.openUri(SPONSOR_URL) },
                     )
                 }
@@ -294,7 +298,7 @@ private fun SupportItem(
         trailingContent = {
             Icon(
                 TablerIcons.ExternalLink,
-                contentDescription = "Open in browser",
+                contentDescription = "在浏览器中打开",
                 modifier = Modifier.size(18.dp),
             )
         },
@@ -319,10 +323,10 @@ private fun UpdateStatus(state: UpdateUiState) {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
     val text = when (state) {
-        UpdateUiState.Idle -> "Current version ${BuildConfig.VERSION_NAME}"
-        UpdateUiState.Checking -> "Contacting GitHub"
-        is UpdateUiState.UpToDate -> "Up to date · ${state.latestVersion}"
-        is UpdateUiState.Available -> "${state.release.tagName} is available"
+        UpdateUiState.Idle -> "当前版本 ${BuildConfig.VERSION_NAME}"
+        UpdateUiState.Checking -> "正在连接 GitHub"
+        is UpdateUiState.UpToDate -> "已是最新版本 · ${state.latestVersion}"
+        is UpdateUiState.Available -> "发现新版本 ${state.release.tagName}"
         is UpdateUiState.Failed -> state.message
     }
     Text(text, color = color)
@@ -353,7 +357,7 @@ private fun Swatch(
             .background(color)
             .then(if (selected) Modifier.border(3.dp, ring, CircleShape) else Modifier)
             .semantics {
-                contentDescription = "$label accent"
+                contentDescription = "$label 强调色"
                 this.selected = selected
             }
             .clickable(enabled = enabled, onClick = onClick),

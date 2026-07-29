@@ -126,9 +126,9 @@ class ContentStreamEngineTest {
 
         val parsed = ContentStreamEngine.parse(page)
         assertEquals(2, parsed.leaves.count { it.kind == NodeKind.PATH })
-        val forms = flatten(parsed.root).filter { it.label == "Form" }
+        val forms = flatten(parsed.root).filter { it.label == "表单对象" }
         assertEquals(3, forms.size)
-        assertTrue(forms.any { it.detail.contains("recursive reference") && it.children.isEmpty() })
+        assertTrue(forms.any { it.detail.contains("递归引用") && it.children.isEmpty() })
         doc.close()
     }
 
