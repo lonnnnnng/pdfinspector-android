@@ -3,6 +3,7 @@ package SVS.pdfinspector
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Matrix
@@ -13,6 +14,7 @@ import android.provider.OpenableColumns
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
@@ -21,7 +23,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.font.PDFont
+import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineNode
 import com.tom_roush.pdfbox.rendering.PDFRenderer
+import com.tom_roush.pdfbox.text.PDFTextStripper
 import SVS.pdfinspector.engine.ContentStreamEngine
 import SVS.pdfinspector.engine.DrawNode
 import SVS.pdfinspector.engine.EditCaps
@@ -36,11 +40,13 @@ import SVS.pdfinspector.engine.collectGroupIds
 import SVS.pdfinspector.engine.findNode
 import SVS.pdfinspector.ui.PageTransform
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.roundToInt
 
 class PdfDocumentViewModel : ViewModel() {
 
@@ -55,6 +61,19 @@ class PdfDocumentViewModel : ViewModel() {
     private var pfd: ParcelFileDescriptor? = null
     private var cacheFile: File? = null
     private val renderMutex = Mutex()
+    private val readerDataMutex = Mutex()
+    private var documentGeneration = 0
+    private var searchJob: Job? = null
+
+    val readerPages = mutableStateMapOf<Int, ReaderPageState>()
+    val readerThumbnails = mutableStateMapOf<Int, ReaderPageState>()
+    var readerState by mutableStateOf(ReaderUiState())
+        private set
+    var readerHistory by mutableStateOf<List<ReaderHistoryEntry>>(emptyList())
+        private set
+    private val readerPageLru = LinkedHashSet<Int>()
+    private val readerThumbnailLru = LinkedHashSet<Int>()
+    private val readerTextCache = HashMap<Int, String>()
 
     private var fontCatalog: FontCatalog? = null
     private var embeddedFonts = false
@@ -63,40 +82,86 @@ class PdfDocumentViewModel : ViewModel() {
     private val redoStack = ArrayDeque<EditSnapshot>()
     private var historyBytes = 0L
 
-    fun open(context: Context, uri: Uri) {
+    fun open(
+        context: Context,
+        uri: Uri,
+        mode: AppMode = AppMode.EDIT,
+        startPage: Int = 0,
+    ) {
+        val generation = ++documentGeneration
         state = state.copy(loading = true, error = null)
         viewModelScope.launch {
             try {
                 val loaded = withContext(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                        )
+                    }
                     val bytes = context.contentResolver.openInputStream(uri).use { input ->
                         requireNotNull(input) { "无法打开所选文件" }.readBytes()
                     }
-                    val file = File(context.cacheDir, "working.pdf")
+                    val file = File(context.cacheDir, "working-$generation.pdf")
                     file.writeBytes(bytes)
-                    PDDocument.load(bytes) to file
+                    val doc = PDDocument.load(bytes)
+                    LoadedDocument(
+                        document = doc,
+                        file = file,
+                        title = displayName(context, uri),
+                        pageInfos = collectReaderPageInfos(doc),
+                        outline = collectReaderOutline(doc),
+                    )
+                }
+                if (generation != documentGeneration) {
+                    loaded.document.close()
+                    loaded.file.delete()
+                    return@launch
                 }
                 document?.close()
                 closeRenderer()
                 clearHistory()
-                document = loaded.first
-                cacheFile = loaded.second
+                clearReaderCaches()
+                document = loaded.document
+                cacheFile = loaded.file
                 fontCatalog = FontCatalog(context.applicationContext)
                 embeddedFonts = false
-                openRenderer(loaded.second)
-                renderPage(0)
+                openRenderer(loaded.file)
+                val initialPage = startPage.coerceIn(0, (loaded.document.numberOfPages - 1).coerceAtLeast(0))
+                if (mode == AppMode.EDIT) renderPage(initialPage)
+                val sourceUri = uri.toString()
+                val preferences = ReaderPreferences(context)
+                val bookmarks = preferences.loadBookmarks(sourceUri)
+                readerHistory = preferences.loadHistory()
+                readerState = ReaderUiState(
+                    pageInfos = loaded.pageInfos,
+                    outline = loaded.outline,
+                    bookmarks = bookmarks,
+                )
                 state = state.copy(
                     loading = false,
                     hasDocument = true,
-                    pageCount = loaded.first.numberOfPages,
-                    pageIndex = 0,
-                    fileName = displayName(context, uri),
+                    mode = mode,
+                    pageCount = loaded.document.numberOfPages,
+                    pageIndex = initialPage,
+                    fileName = loaded.title,
+                    sourceUri = sourceUri,
                     documentToken = state.documentToken + 1,
                     canUndo = false,
                     canRedo = false,
                 )
+                if (mode == AppMode.READ) {
+                    preferences.record(
+                        ReaderHistoryEntry(sourceUri, loaded.title, initialPage, System.currentTimeMillis()),
+                    )
+                    readerHistory = preferences.loadHistory()
+                    ensureReaderPage(initialPage, DEFAULT_READER_WIDTH_PX)
+                }
             } catch (t: Throwable) {
                 Log.e(TAG, "open failed", t)
-                state = state.copy(loading = false, error = "无法打开 PDF 文件")
+                if (generation == documentGeneration) {
+                    state = state.copy(loading = false, error = "无法打开 PDF 文件")
+                }
             }
         }
     }
@@ -109,6 +174,200 @@ class PdfDocumentViewModel : ViewModel() {
             renderPage(index)
             state = state.copy(busy = null, pageIndex = index)
         }
+    }
+
+    fun switchMode(mode: AppMode) {
+        if (!state.hasDocument || state.mode == mode) return
+        if (mode == AppMode.READ) {
+            state = state.copy(mode = AppMode.READ, selectedId = null, editingId = null)
+            ensureReaderPage(state.pageIndex, DEFAULT_READER_WIDTH_PX)
+            return
+        }
+        viewModelScope.launch {
+            state = state.copy(busy = "正在进入编辑模式")
+            renderPage(state.pageIndex)
+            state = state.copy(mode = AppMode.EDIT, busy = null)
+        }
+    }
+
+    fun loadReaderLibrary(context: Context) {
+        readerHistory = ReaderPreferences(context).loadHistory()
+    }
+
+    fun openHistory(context: Context, entry: ReaderHistoryEntry) {
+        open(context, Uri.parse(entry.uri), AppMode.READ, entry.pageIndex)
+    }
+
+    fun updateReaderPosition(context: Context, pageIndex: Int) {
+        if (state.mode != AppMode.READ || pageIndex !in 0 until state.pageCount) return
+        if (state.pageIndex == pageIndex) return
+        state = state.copy(pageIndex = pageIndex)
+        val sourceUri = state.sourceUri ?: return
+        val preferences = ReaderPreferences(context)
+        preferences.record(
+            ReaderHistoryEntry(sourceUri, state.fileName, pageIndex, System.currentTimeMillis()),
+        )
+        readerHistory = preferences.loadHistory()
+    }
+
+    fun toggleReaderBookmark(context: Context, pageIndex: Int) {
+        val sourceUri = state.sourceUri ?: return
+        val updated = togglePageBookmark(readerState.bookmarks, pageIndex)
+        ReaderPreferences(context).saveBookmarks(sourceUri, updated)
+        readerState = readerState.copy(bookmarks = updated)
+    }
+
+    fun ensureReaderPage(pageIndex: Int, targetWidthPx: Int) {
+        ensureReaderImage(pageIndex, targetWidthPx, thumbnail = false)
+    }
+
+    fun ensureReaderThumbnail(pageIndex: Int) {
+        ensureReaderImage(pageIndex, THUMBNAIL_WIDTH_PX, thumbnail = true)
+    }
+
+    private fun ensureReaderImage(pageIndex: Int, rawWidthPx: Int, thumbnail: Boolean) {
+        val info = readerState.pageInfos.getOrNull(pageIndex) ?: return
+        val widthPx = rawWidthPx.coerceIn(
+            if (thumbnail) THUMBNAIL_WIDTH_PX else MIN_READER_WIDTH_PX,
+            if (thumbnail) THUMBNAIL_WIDTH_PX else MAX_READER_WIDTH_PX,
+        )
+        val target = if (thumbnail) readerThumbnails else readerPages
+        val current = target[pageIndex]
+        if (current?.loading == true || current?.bitmap != null && current.widthPx == widthPx) {
+            touchReaderCache(pageIndex, thumbnail)
+            return
+        }
+        val generation = documentGeneration
+        target[pageIndex] = ReaderPageState(info = info, widthPx = widthPx, loading = true)
+        viewModelScope.launch {
+            try {
+                val bitmap = renderReaderBitmap(pageIndex, info, widthPx)
+                if (generation != documentGeneration) return@launch
+                target[pageIndex] = ReaderPageState(
+                    info = info,
+                    widthPx = widthPx,
+                    bitmap = bitmap.asImageBitmap(),
+                )
+                touchReaderCache(pageIndex, thumbnail)
+            } catch (t: Throwable) {
+                Log.e(TAG, "reader render failed page=$pageIndex", t)
+                if (generation == documentGeneration) {
+                    target[pageIndex] = ReaderPageState(
+                        info = info,
+                        widthPx = widthPx,
+                        error = "页面渲染失败",
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun renderReaderBitmap(
+        pageIndex: Int,
+        info: ReaderPageInfo,
+        widthPx: Int,
+    ): Bitmap {
+        val heightPx = (widthPx * info.heightPoints / info.widthPoints)
+            .roundToInt()
+            .coerceAtLeast(1)
+        return try {
+            renderWithPdfium(pageIndex, widthPx, heightPx)
+        } catch (t: Throwable) {
+            Log.w(TAG, "reader pdfium render failed page=$pageIndex", t)
+            withContext(Dispatchers.IO) {
+                readerDataMutex.withLock {
+                    PDFRenderer(requireNotNull(document)).renderImage(
+                        pageIndex,
+                        widthPx / info.widthPoints,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun touchReaderCache(pageIndex: Int, thumbnail: Boolean) {
+        val lru = if (thumbnail) readerThumbnailLru else readerPageLru
+        val target = if (thumbnail) readerThumbnails else readerPages
+        val limit = if (thumbnail) MAX_THUMBNAIL_CACHE else MAX_READER_PAGE_CACHE
+        lru.remove(pageIndex)
+        lru.add(pageIndex)
+        while (lru.size > limit) {
+            val oldest = lru.first()
+            lru.remove(oldest)
+            target.remove(oldest)
+        }
+    }
+
+    suspend fun readerPageText(pageIndex: Int): String {
+        if (pageIndex !in 0 until state.pageCount) return ""
+        val generation = documentGeneration
+        return withContext(Dispatchers.IO) {
+            readerDataMutex.withLock {
+                readerTextCache[pageIndex]?.let { return@withLock it }
+                val doc = document ?: return@withLock ""
+                val text = PDFTextStripper().apply {
+                    startPage = pageIndex + 1
+                    endPage = pageIndex + 1
+                    sortByPosition = true
+                }.getText(doc).trim()
+                if (generation == documentGeneration) readerTextCache[pageIndex] = text
+                text
+            }
+        }
+    }
+
+    fun searchReader(rawQuery: String) {
+        val query = rawQuery.trim()
+        searchJob?.cancel()
+        if (query.isEmpty()) {
+            readerState = readerState.copy(
+                searchQuery = "",
+                searchResults = emptyList(),
+                searching = false,
+                searchProgress = 0,
+            )
+            return
+        }
+        val generation = documentGeneration
+        readerState = readerState.copy(
+            searchQuery = query,
+            searchResults = emptyList(),
+            searching = true,
+            searchProgress = 0,
+            searchError = null,
+        )
+        searchJob = viewModelScope.launch {
+            try {
+                val texts = ArrayList<String>(state.pageCount)
+                for (pageIndex in 0 until state.pageCount) {
+                    if (generation != documentGeneration) return@launch
+                    texts += readerPageText(pageIndex)
+                    readerState = readerState.copy(searchProgress = pageIndex + 1)
+                }
+                if (generation == documentGeneration) {
+                    readerState = readerState.copy(
+                        searchResults = searchPageTexts(texts, query),
+                        searching = false,
+                    )
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "reader search failed", t)
+                if (generation == documentGeneration) {
+                    readerState = readerState.copy(searching = false, searchError = "全文搜索失败")
+                }
+            }
+        }
+    }
+
+    fun clearReaderSearch() {
+        searchJob?.cancel()
+        readerState = readerState.copy(
+            searchQuery = "",
+            searchResults = emptyList(),
+            searching = false,
+            searchProgress = 0,
+            searchError = null,
+        )
     }
 
     fun select(id: Int?, reveal: Boolean = false) {
@@ -436,11 +695,14 @@ class PdfDocumentViewModel : ViewModel() {
     }
 
     fun closeDocument() {
+        documentGeneration++
+        searchJob?.cancel()
         closeRenderer()
         document?.close()
         document = null
         parsed = null
         clearHistory()
+        clearReaderCaches()
         runCatching { cacheFile?.delete() }
         cacheFile = null
         fontCatalog = null
@@ -611,6 +873,7 @@ class PdfDocumentViewModel : ViewModel() {
                 }
             }
             openRenderer(file)
+            invalidateReaderDocumentContent()
         }
     }
 
@@ -622,7 +885,68 @@ class PdfDocumentViewModel : ViewModel() {
         return fromResolver ?: uri.lastPathSegment?.substringAfterLast('/') ?: "文档.pdf"
     }
 
+    private fun collectReaderPageInfos(doc: PDDocument): List<ReaderPageInfo> =
+        (0 until doc.numberOfPages).map { pageIndex ->
+            val page = doc.getPage(pageIndex)
+            val crop = page.cropBox
+            val rotation = ((page.rotation % 360) + 360) % 360
+            val width = if (rotation == 90 || rotation == 270) crop.height else crop.width
+            val height = if (rotation == 90 || rotation == 270) crop.width else crop.height
+            ReaderPageInfo(pageIndex, width.coerceAtLeast(1f), height.coerceAtLeast(1f))
+        }
+
+    private fun collectReaderOutline(doc: PDDocument): List<ReaderOutlineEntry> {
+        val root = doc.documentCatalog.documentOutline ?: return emptyList()
+        val entries = ArrayList<ReaderOutlineEntry>()
+        appendReaderOutline(doc, root, level = 0, entries)
+        return entries
+    }
+
+    private fun appendReaderOutline(
+        doc: PDDocument,
+        node: PDOutlineNode,
+        level: Int,
+        entries: MutableList<ReaderOutlineEntry>,
+    ) {
+        node.children().forEach { item ->
+            val pageIndex = runCatching {
+                item.findDestinationPage(doc)?.let(doc.pages::indexOf)
+            }.getOrNull() ?: -1
+            val title = item.title?.trim().orEmpty()
+            if (title.isNotEmpty() && pageIndex >= 0) {
+                entries += ReaderOutlineEntry(title, pageIndex, level)
+            }
+            if (item.hasChildren()) appendReaderOutline(doc, item, level + 1, entries)
+        }
+    }
+
+    private fun clearReaderCaches() {
+        readerPages.clear()
+        readerThumbnails.clear()
+        readerPageLru.clear()
+        readerThumbnailLru.clear()
+        readerTextCache.clear()
+        readerState = ReaderUiState()
+    }
+
+    private fun invalidateReaderDocumentContent() {
+        readerPages.clear()
+        readerThumbnails.clear()
+        readerPageLru.clear()
+        readerThumbnailLru.clear()
+        readerTextCache.clear()
+        readerState = readerState.copy(
+            searchQuery = "",
+            searchResults = emptyList(),
+            searching = false,
+            searchProgress = 0,
+            searchError = null,
+        )
+    }
+
     override fun onCleared() {
+        documentGeneration++
+        searchJob?.cancel()
         closeRenderer()
         document?.close()
         document = null
@@ -633,11 +957,25 @@ class PdfDocumentViewModel : ViewModel() {
     companion object {
         const val RENDER_DPI = 144f
         private const val MAX_TILE_PX = 4096
+        private const val DEFAULT_READER_WIDTH_PX = 1080
+        private const val MIN_READER_WIDTH_PX = 320
+        private const val MAX_READER_WIDTH_PX = 2560
+        private const val THUMBNAIL_WIDTH_PX = 180
+        private const val MAX_READER_PAGE_CACHE = 8
+        private const val MAX_THUMBNAIL_CACHE = 40
         private const val TAG = "PdfInspector"
         private const val MAX_HISTORY = 50
         private const val MAX_HISTORY_BYTES = 16L * 1024 * 1024
     }
 }
+
+private data class LoadedDocument(
+    val document: PDDocument,
+    val file: File,
+    val title: String,
+    val pageInfos: List<ReaderPageInfo>,
+    val outline: List<ReaderOutlineEntry>,
+)
 
 private class EditSnapshot(val pageIndex: Int, val content: PageEditSnapshot)
 
@@ -660,11 +998,13 @@ data class PdfUiState(
     val loading: Boolean = false,
     val busy: String? = null,
     val hasDocument: Boolean = false,
+    val mode: AppMode? = null,
     val bitmap: ImageBitmap? = null,
     val pageIndex: Int = 0,
     val pageCount: Int = 0,
     val elementCount: Int = 0,
     val fileName: String = "",
+    val sourceUri: String? = null,
     val page: ParsedPage? = null,
     val pageTransform: PageTransform? = null,
     val selectedId: Int? = null,
@@ -679,4 +1019,23 @@ data class PdfUiState(
     val documentToken: Int = 0,
     val fontCatalogTick: Int = 0,
     val error: String? = null,
+)
+
+data class ReaderPageState(
+    val info: ReaderPageInfo,
+    val widthPx: Int,
+    val bitmap: ImageBitmap? = null,
+    val loading: Boolean = false,
+    val error: String? = null,
+)
+
+data class ReaderUiState(
+    val pageInfos: List<ReaderPageInfo> = emptyList(),
+    val outline: List<ReaderOutlineEntry> = emptyList(),
+    val bookmarks: Set<Int> = emptySet(),
+    val searchQuery: String = "",
+    val searchResults: List<ReaderSearchResult> = emptyList(),
+    val searching: Boolean = false,
+    val searchProgress: Int = 0,
+    val searchError: String? = null,
 )

@@ -12,7 +12,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,6 +32,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -47,6 +51,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -84,6 +89,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import compose.icons.TablerIcons
 import compose.icons.tablericons.FileText
 import compose.icons.tablericons.Folder
+import compose.icons.tablericons.Book
+import compose.icons.tablericons.ChevronRight
+import compose.icons.tablericons.Edit
+import compose.icons.tablericons.History
 import compose.icons.tablericons.Settings
 import SVS.pdfinspector.engine.NodeKind
 import SVS.pdfinspector.engine.findNode
@@ -95,6 +104,7 @@ import SVS.pdfinspector.ui.InspectorPane
 import SVS.pdfinspector.ui.InspectorToolbar
 import SVS.pdfinspector.ui.LeafRect
 import SVS.pdfinspector.ui.PdfCanvas
+import SVS.pdfinspector.ui.ReaderScreen
 import SVS.pdfinspector.ui.SettingsScreen
 import SVS.pdfinspector.ui.theme.InspectorTheme
 import SVS.pdfinspector.ui.theme.ThemeState
@@ -134,19 +144,24 @@ fun InspectorScreen(
     val state = viewModel.state
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showExitConfirmation by rememberSaveable { mutableStateOf(false) }
+    var pendingMode by rememberSaveable { mutableStateOf(AppMode.EDIT) }
 
     LaunchedEffect(initialUri) {
-        if (initialUri != null) viewModel.open(context, initialUri)
+        viewModel.loadReaderLibrary(context)
+        if (initialUri != null) viewModel.open(context, initialUri, AppMode.READ)
     }
 
     val openLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
-    ) { uri -> uri?.let { viewModel.open(context, it) } }
+    ) { uri -> uri?.let { viewModel.open(context, it, pendingMode) } }
     val saveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/pdf"),
     ) { uri -> uri?.let { viewModel.saveCopy(context, it) } }
 
-    fun pickPdf() = openLauncher.launch(arrayOf("application/pdf"))
+    fun pickPdf(mode: AppMode) {
+        pendingMode = mode
+        openLauncher.launch(arrayOf("application/pdf"))
+    }
 
     val configuration = LocalConfiguration.current
     val landscape = configuration.screenWidthDp > configuration.screenHeightDp
@@ -213,6 +228,25 @@ fun InspectorScreen(
             theme = themeState,
             onBack = { showSettings = false },
         )
+    } else if (state.hasDocument && state.mode == AppMode.READ) {
+        key(state.documentToken) {
+            ReaderScreen(
+                viewModel = viewModel,
+                state = state,
+                fullscreen = fullscreen,
+                onToggleFullscreen = { fullscreen = !fullscreen },
+                onClose = {
+                    fullscreen = false
+                    viewModel.closeDocument()
+                },
+                onOpen = { pickPdf(AppMode.READ) },
+                onSettings = {
+                    fullscreen = false
+                    showSettings = true
+                },
+            )
+        }
+        state.busy?.let { BusyOverlay(it) }
     } else if (state.hasDocument) {
         Box(Modifier.fillMaxSize()) {
             Scaffold(
@@ -234,7 +268,7 @@ fun InspectorScreen(
                         onNext = { viewModel.showPage(state.pageIndex + 1) },
                         onUndo = { viewModel.undo() },
                         onRedo = { viewModel.redo() },
-                        onOpen = { pickPdf() },
+                        onOpen = { pickPdf(AppMode.EDIT) },
                         onSave = { saveLauncher.launch("已编辑.pdf") },
                         onSettings = {
                             fullscreen = false
@@ -271,12 +305,15 @@ fun InspectorScreen(
         HomeScreen(
             loading = state.loading,
             error = state.error,
-            onOpen = ::pickPdf,
+            history = viewModel.readerHistory,
+            onOpenEdit = { pickPdf(AppMode.EDIT) },
+            onOpenRead = { pickPdf(AppMode.READ) },
+            onOpenHistory = { viewModel.openHistory(context, it) },
             onSettings = { showSettings = true },
         )
     }
 
-    if (!showSettings && state.editingId != null) {
+    if (!showSettings && state.mode == AppMode.EDIT && state.editingId != null) {
         val target = remember(state.editingId, state.page, state.fontCatalogTick) {
             viewModel.editTarget()
         }
@@ -577,7 +614,10 @@ private fun InlineTextEditor(
 private fun HomeScreen(
     loading: Boolean,
     error: String?,
-    onOpen: () -> Unit,
+    history: List<ReaderHistoryEntry>,
+    onOpenEdit: () -> Unit,
+    onOpenRead: () -> Unit,
+    onOpenHistory: (ReaderHistoryEntry) -> Unit,
     onSettings: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
@@ -608,91 +648,178 @@ private fun HomeScreen(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            contentAlignment = Alignment.Center,
         ) {
-            when {
-                loading -> CircularProgressIndicator()
-                error != null -> ErrorState(message = error, onOpen = onOpen)
-                else -> EmptyState(onOpen = onOpen)
+            if (loading) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        horizontal = 20.dp,
+                        vertical = 24.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    item {
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            Column(
+                                modifier = Modifier.widthIn(max = 680.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Surface(
+                                    modifier = Modifier.size(76.dp),
+                                    shape = MaterialTheme.shapes.extraLarge,
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = TablerIcons.FileText,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(38.dp),
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.height(18.dp))
+                                Text("选择使用方式", style = MaterialTheme.typography.headlineSmall)
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "同一个 PDF 可以进入内容编辑工作区，也可以作为阅读器连续浏览。",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
+                    }
+                    if (error != null) {
+                        item {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = MaterialTheme.shapes.medium,
+                                color = MaterialTheme.colorScheme.errorContainer,
+                            ) {
+                                Text(
+                                    error,
+                                    modifier = Modifier.padding(16.dp),
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                )
+                            }
+                        }
+                    }
+                    item {
+                        ModeCard(
+                            icon = { Icon(TablerIcons.Edit, contentDescription = null) },
+                            title = "进入编辑模式",
+                            description = "检查并修改 PDF 中的文本、路径、图像和颜色。",
+                            onClick = onOpenEdit,
+                        )
+                    }
+                    item {
+                        ModeCard(
+                            icon = { Icon(TablerIcons.Book, contentDescription = null) },
+                            title = "进入阅读模式",
+                            description = "连续滚动、搜索、目录、书签、缩略图和文本复制。",
+                            onClick = onOpenRead,
+                        )
+                    }
+                    if (history.isNotEmpty()) {
+                        item {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(top = 12.dp),
+                            ) {
+                                Icon(
+                                    TablerIcons.History,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text("阅读历史", style = MaterialTheme.typography.titleMedium)
+                            }
+                        }
+                        items(history, key = { it.uri }) { entry ->
+                            HistoryItem(entry = entry, onClick = { onOpenHistory(entry) })
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun EmptyState(onOpen: () -> Unit) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(horizontal = 28.dp, vertical = 24.dp),
+private fun ModeCard(
+    icon: @Composable () -> Unit,
+    title: String,
+    description: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 1.dp,
+        shadowElevation = 1.dp,
     ) {
-        Surface(
-            modifier = Modifier.size(80.dp),
-            shape = MaterialTheme.shapes.extraLarge,
-            color = MaterialTheme.colorScheme.primaryContainer,
+        Row(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = TablerIcons.FileText,
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            Surface(
+                modifier = Modifier.size(48.dp),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ) {
+                Box(contentAlignment = Alignment.Center) { icon() }
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-        Spacer(Modifier.height(24.dp))
-        Text("打开 PDF", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = "检查并编辑文档中的文本、路径和图像。",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.widthIn(max = 320.dp),
-        )
-        Spacer(Modifier.height(28.dp))
-        Button(onClick = onOpen) {
-            Icon(TablerIcons.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("选择 PDF")
+            Icon(TablerIcons.ChevronRight, contentDescription = "打开", modifier = Modifier.size(20.dp))
         }
     }
 }
 
 @Composable
-private fun ErrorState(message: String, onOpen: () -> Unit) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(horizontal = 28.dp, vertical = 24.dp),
+private fun HistoryItem(entry: ReaderHistoryEntry, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
     ) {
-        Surface(
-            modifier = Modifier.size(72.dp),
-            shape = MaterialTheme.shapes.extraLarge,
-            color = MaterialTheme.colorScheme.errorContainer,
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = TablerIcons.FileText,
-                    contentDescription = null,
-                    modifier = Modifier.size(34.dp),
-                    tint = MaterialTheme.colorScheme.onErrorContainer,
+            Icon(
+                TablerIcons.FileText,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(entry.title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                Text(
+                    "上次阅读到第 ${entry.pageIndex + 1} 页",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-        Spacer(Modifier.height(20.dp))
-        Text("无法打开此 PDF", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.widthIn(max = 360.dp),
-        )
-        Spacer(Modifier.height(24.dp))
-        Button(onClick = onOpen) {
-            Icon(TablerIcons.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("选择其他 PDF")
+            Icon(TablerIcons.ChevronRight, contentDescription = "继续阅读")
         }
     }
 }
