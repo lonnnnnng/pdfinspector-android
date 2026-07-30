@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -67,6 +68,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -470,17 +472,27 @@ private fun ReaderZoomDialog(
                         onUserTransform = {},
                         onSelect = {},
                         renderTile = { pageIndex, src, outW, outH ->
+                            // long: 阅读位图按屏幕宽度生成，而高清区域接口使用 144-DPI 坐标，先换算可避免 tile 覆盖后被放大裁切。
+                            val renderSource = mapReaderTileToRenderCoordinates(
+                                source = src,
+                                bitmapWidth = bitmap.width,
+                                bitmapHeight = bitmap.height,
+                                pageWidthPoints = info.widthPoints,
+                                pageHeightPoints = info.heightPoints,
+                                renderDpi = PdfDocumentViewModel.RENDER_DPI,
+                            )
                             viewModel.renderRegion(
                                 pageIndex,
-                                src.left,
-                                src.top,
-                                src.right,
-                                src.bottom,
+                                renderSource.left,
+                                renderSource.top,
+                                renderSource.right,
+                                renderSource.bottom,
                                 outW,
                                 outH,
                             )?.asImageBitmap()
                         },
-                        modifier = Modifier.fillMaxSize(),
+                        // long: 放大画布只占工具栏下方的剩余空间，避免按整屏测量后被父容器裁切并产生错误适宽比例。
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
                 }
             }
@@ -718,7 +730,7 @@ private fun ReaderTextSheet(
     var text by remember(pageIndex) { mutableStateOf<String?>(null) }
     LaunchedEffect(pageIndex) { text = viewModel.readerPageText(pageIndex) }
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.padding(horizontal = 20.dp)) {
+        Column(Modifier.padding(horizontal = 20.dp).navigationBarsPadding()) {
             Text("第 ${pageIndex + 1} 页文本", style = MaterialTheme.typography.titleLarge)
             Text(
                 "长按文字可以选择并复制",
@@ -733,17 +745,22 @@ private fun ReaderTextSheet(
                 ) { CircularProgressIndicator() }
                 text.isNullOrBlank() -> EmptyPanelMessage("本页没有可提取的文本")
                 else -> {
+                    // long: 文本区单独滚动并限制高度，既保留长按选择手势，也确保整页复制按钮在小屏上始终可达。
                     SelectionContainer {
-                        Text(
-                            text.orEmpty(),
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(max = 440.dp)
+                                .heightIn(min = 160.dp, max = 260.dp)
                                 .verticalScroll(rememberScrollState()),
-                        )
+                        ) {
+                            Text(text.orEmpty())
+                        }
                     }
                     Spacer(Modifier.height(12.dp))
-                    FilledTonalButton(onClick = { copyText(context, text.orEmpty()) }) {
+                    FilledTonalButton(
+                        onClick = { copyText(context, text.orEmpty()) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
                         Icon(TablerIcons.Copy, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
                         Text("复制本页全部文本")
@@ -803,4 +820,23 @@ private fun copyText(context: Context, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(ClipData.newPlainText("PDF 文本", text))
     Toast.makeText(context, "已复制本页文本", Toast.LENGTH_SHORT).show()
+}
+
+internal fun mapReaderTileToRenderCoordinates(
+    source: Rect,
+    bitmapWidth: Int,
+    bitmapHeight: Int,
+    pageWidthPoints: Float,
+    pageHeightPoints: Float,
+    renderDpi: Float,
+): Rect {
+    require(bitmapWidth > 0 && bitmapHeight > 0) { "阅读位图尺寸必须大于 0" }
+    val sourceScaleX = (pageWidthPoints * renderDpi / 72f) / bitmapWidth
+    val sourceScaleY = (pageHeightPoints * renderDpi / 72f) / bitmapHeight
+    return Rect(
+        left = source.left * sourceScaleX,
+        top = source.top * sourceScaleY,
+        right = source.right * sourceScaleX,
+        bottom = source.bottom * sourceScaleY,
+    )
 }
