@@ -1,6 +1,7 @@
 package SVS.pdfinspector
 
 import android.content.Context
+import androidx.core.content.edit
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -108,7 +109,7 @@ class ReaderPreferences(context: Context) {
                     .put("updatedAt", item.updatedAt),
             )
         }
-        preferences.edit().putString(KEY_HISTORY, array.toString()).apply()
+        preferences.edit { putString(KEY_HISTORY, array.toString()) }
     }
 
     fun loadBookmarks(documentUri: String): Set<Int> {
@@ -124,7 +125,7 @@ class ReaderPreferences(context: Context) {
         val array = JSONArray()
         pages.sorted().forEach(array::put)
         root.put(documentUri, array)
-        preferences.edit().putString(KEY_BOOKMARKS, root.toString()).apply()
+        preferences.edit { putString(KEY_BOOKMARKS, root.toString()) }
     }
 
     private fun bookmarkRoot(): JSONObject = runCatching {

@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -67,11 +66,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import compose.icons.TablerIcons
 import compose.icons.tablericons.Bookmarks
 import compose.icons.tablericons.ChevronLeft
@@ -83,6 +86,7 @@ import compose.icons.tablericons.GridDots
 import compose.icons.tablericons.Maximize
 import compose.icons.tablericons.Minimize
 import compose.icons.tablericons.Search
+import compose.icons.tablericons.X
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import SVS.pdfinspector.AppMode
@@ -118,6 +122,7 @@ fun ReaderScreen(
     var panel by remember { mutableStateOf<ReaderPanel?>(null) }
     var showJumpDialog by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
+    var zoomPage by remember { mutableStateOf<Int?>(null) }
 
     fun jumpTo(pageIndex: Int) {
         val target = pageIndex.coerceIn(0, (state.pageCount - 1).coerceAtLeast(0))
@@ -274,6 +279,7 @@ fun ReaderScreen(
                     viewModel = viewModel,
                     info = info,
                     documentToken = state.documentToken,
+                    onZoom = { zoomPage = info.pageIndex },
                 )
             }
         }
@@ -330,6 +336,16 @@ fun ReaderScreen(
             onDismiss = { showJumpDialog = false },
         )
     }
+
+    zoomPage?.let { pageIndex ->
+        readerState.pageInfos.getOrNull(pageIndex)?.let { info ->
+            ReaderZoomDialog(
+                viewModel = viewModel,
+                info = info,
+                onDismiss = { zoomPage = null },
+            )
+        }
+    }
 }
 
 @Composable
@@ -354,6 +370,7 @@ private fun ReaderPage(
     viewModel: PdfDocumentViewModel,
     info: ReaderPageInfo,
     documentToken: Int,
+    onZoom: () -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val targetWidth = constraints.maxWidth.coerceAtLeast(1)
@@ -365,7 +382,8 @@ private fun ReaderPage(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(info.widthPoints / info.heightPoints),
+                    .aspectRatio(info.widthPoints / info.heightPoints)
+                    .clickable(onClick = onZoom),
                 shape = MaterialTheme.shapes.small,
                 color = MaterialTheme.colorScheme.surface,
                 shadowElevation = 2.dp,
@@ -392,6 +410,80 @@ private fun ReaderPage(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+@Composable
+private fun ReaderZoomDialog(
+    viewModel: PdfDocumentViewModel,
+    info: ReaderPageInfo,
+    onDismiss: () -> Unit,
+) {
+    val page = viewModel.readerPages[info.pageIndex]
+    val bitmap = page?.bitmap
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = onDismiss) {
+                        Icon(TablerIcons.X, contentDescription = "关闭放大视图")
+                    }
+                    Text("第 ${info.pageIndex + 1} 页", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "双指缩放和拖动",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (bitmap == null) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    val scaleState = remember(info.pageIndex) { mutableStateOf(1f) }
+                    val offsetState = remember(info.pageIndex) { mutableStateOf(Offset.Zero) }
+                    PdfCanvas(
+                        bitmap = bitmap,
+                        pageIndex = info.pageIndex,
+                        scaleState = scaleState,
+                        offsetState = offsetState,
+                        leaves = emptyList(),
+                        selectedRect = null,
+                        highlightColor = MaterialTheme.colorScheme.primary,
+                        backdropColor = MaterialTheme.colorScheme.surfaceVariant,
+                        runBoxes = emptyList(),
+                        editingRunId = null,
+                        textBoxColor = MaterialTheme.colorScheme.outline,
+                        onEditRun = {},
+                        fitMode = FitMode.WIDTH,
+                        onUserTransform = {},
+                        onSelect = {},
+                        renderTile = { pageIndex, src, outW, outH ->
+                            viewModel.renderRegion(
+                                pageIndex,
+                                src.left,
+                                src.top,
+                                src.right,
+                                src.bottom,
+                                outW,
+                                outH,
+                            )?.asImageBitmap()
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
         }
     }
 }

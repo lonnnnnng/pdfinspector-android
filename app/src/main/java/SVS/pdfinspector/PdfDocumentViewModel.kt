@@ -19,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -39,8 +40,10 @@ import SVS.pdfinspector.engine.StreamOwner
 import SVS.pdfinspector.engine.collectGroupIds
 import SVS.pdfinspector.engine.findNode
 import SVS.pdfinspector.ui.PageTransform
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -118,15 +121,21 @@ class PdfDocumentViewModel : ViewModel() {
                     loaded.file.delete()
                     return@launch
                 }
-                document?.close()
-                closeRenderer()
+                val previousCacheFile = cacheFile
+                readerDataMutex.withLock {
+                    renderMutex.withLock {
+                        closeRenderer()
+                        document?.close()
+                        document = loaded.document
+                        cacheFile = loaded.file
+                        openRenderer(loaded.file)
+                    }
+                }
+                runCatching { previousCacheFile?.delete() }
                 clearHistory()
                 clearReaderCaches()
-                document = loaded.document
-                cacheFile = loaded.file
                 fontCatalog = FontCatalog(context.applicationContext)
                 embeddedFonts = false
-                openRenderer(loaded.file)
                 val initialPage = startPage.coerceIn(0, (loaded.document.numberOfPages - 1).coerceAtLeast(0))
                 if (mode == AppMode.EDIT) renderPage(initialPage)
                 val sourceUri = uri.toString()
@@ -184,6 +193,7 @@ class PdfDocumentViewModel : ViewModel() {
             return
         }
         viewModelScope.launch {
+            searchJob?.cancelAndJoin()
             state = state.copy(busy = "正在进入编辑模式")
             renderPage(state.pageIndex)
             state = state.copy(mode = AppMode.EDIT, busy = null)
@@ -195,7 +205,7 @@ class PdfDocumentViewModel : ViewModel() {
     }
 
     fun openHistory(context: Context, entry: ReaderHistoryEntry) {
-        open(context, Uri.parse(entry.uri), AppMode.READ, entry.pageIndex)
+        open(context, entry.uri.toUri(), AppMode.READ, entry.pageIndex)
     }
 
     fun updateReaderPosition(context: Context, pageIndex: Int) {
@@ -241,7 +251,7 @@ class PdfDocumentViewModel : ViewModel() {
         target[pageIndex] = ReaderPageState(info = info, widthPx = widthPx, loading = true)
         viewModelScope.launch {
             try {
-                val bitmap = renderReaderBitmap(pageIndex, info, widthPx)
+                val bitmap = renderReaderBitmap(pageIndex, info, widthPx, generation)
                 if (generation != documentGeneration) return@launch
                 target[pageIndex] = ReaderPageState(
                     info = info,
@@ -266,12 +276,13 @@ class PdfDocumentViewModel : ViewModel() {
         pageIndex: Int,
         info: ReaderPageInfo,
         widthPx: Int,
+        generation: Int,
     ): Bitmap {
         val heightPx = (widthPx * info.heightPoints / info.widthPoints)
             .roundToInt()
             .coerceAtLeast(1)
         return try {
-            renderWithPdfium(pageIndex, widthPx, heightPx)
+            renderWithPdfium(pageIndex, widthPx, heightPx, generation)
         } catch (t: Throwable) {
             Log.w(TAG, "reader pdfium render failed page=$pageIndex", t)
             withContext(Dispatchers.IO) {
@@ -325,6 +336,7 @@ class PdfDocumentViewModel : ViewModel() {
                 searchResults = emptyList(),
                 searching = false,
                 searchProgress = 0,
+                searchError = null,
             )
             return
         }
@@ -350,6 +362,9 @@ class PdfDocumentViewModel : ViewModel() {
                         searching = false,
                     )
                 }
+            } catch (cancelled: CancellationException) {
+                // long: 用户改用新关键词或关闭搜索面板时会主动取消旧任务，取消属于正常控制流，不能显示成搜索失败。
+                throw cancelled
             } catch (t: Throwable) {
                 Log.e(TAG, "reader search failed", t)
                 if (generation == documentGeneration) {
@@ -697,39 +712,52 @@ class PdfDocumentViewModel : ViewModel() {
     fun closeDocument() {
         documentGeneration++
         searchJob?.cancel()
-        closeRenderer()
-        document?.close()
-        document = null
-        parsed = null
-        clearHistory()
-        clearReaderCaches()
-        runCatching { cacheFile?.delete() }
-        cacheFile = null
-        fontCatalog = null
-        embeddedFonts = false
-        state = PdfUiState()
+        state = state.copy(busy = "正在关闭文档")
+        viewModelScope.launch {
+            readerDataMutex.withLock {
+                renderMutex.withLock {
+                    closeRenderer()
+                    document?.close()
+                    document = null
+                }
+            }
+            parsed = null
+            clearHistory()
+            clearReaderCaches()
+            runCatching { cacheFile?.delete() }
+            cacheFile = null
+            fontCatalog = null
+            embeddedFonts = false
+            state = PdfUiState()
+        }
     }
 
     private suspend fun renderPage(index: Int) {
-        val doc = document ?: return
+        val generation = documentGeneration
         try {
             val result = withContext(Dispatchers.IO) {
-                val page = doc.getPage(index)
-                val crop = page.cropBox
-                val scale = RENDER_DPI / 72f
-                val rot = ((page.rotation % 360) + 360) % 360
-                val baseW = Math.round(crop.width * scale)
-                val baseH = Math.round(crop.height * scale)
-                val pxW = if (rot == 90 || rot == 270) baseH else baseW
-                val pxH = if (rot == 90 || rot == 270) baseW else baseH
-                val bmp = renderPageBitmap(index, pxW, pxH)
-                val parsedPage = ContentStreamEngine.parse(page)
-                val transform = PageTransform(
-                    crop.lowerLeftX, crop.lowerLeftY, crop.width, crop.height,
-                    page.rotation, scale,
-                )
-                Triple(bmp, parsedPage, transform)
+                // long: 页面解析和 PDFBox 回退共享同一 PDDocument，串行读取可避免切换文档时旧任务访问已关闭对象。
+                readerDataMutex.withLock {
+                    check(generation == documentGeneration) { "文档已经切换" }
+                    val doc = requireNotNull(document) { "文档已经关闭" }
+                    val page = doc.getPage(index)
+                    val crop = page.cropBox
+                    val scale = RENDER_DPI / 72f
+                    val rot = ((page.rotation % 360) + 360) % 360
+                    val baseW = Math.round(crop.width * scale)
+                    val baseH = Math.round(crop.height * scale)
+                    val pxW = if (rot == 90 || rot == 270) baseH else baseW
+                    val pxH = if (rot == 90 || rot == 270) baseW else baseH
+                    val bmp = renderPageBitmap(index, pxW, pxH, generation)
+                    val parsedPage = ContentStreamEngine.parse(page)
+                    val transform = PageTransform(
+                        crop.lowerLeftX, crop.lowerLeftY, crop.width, crop.height,
+                        page.rotation, scale,
+                    )
+                    Triple(bmp, parsedPage, transform)
+                }
             }
+            if (generation != documentGeneration) return
             parsed = result.second
             state = state.copy(
                 bitmap = result.first.asImageBitmap(),
@@ -740,9 +768,13 @@ class PdfDocumentViewModel : ViewModel() {
                 selectedId = null,
                 expanded = collectGroupIds(result.second.root),
             )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (t: Throwable) {
             Log.e(TAG, "render failed page=$index", t)
-            state = state.copy(error = "渲染页面失败")
+            if (generation == documentGeneration) {
+                state = state.copy(error = "渲染页面失败")
+            }
         }
     }
 
@@ -770,9 +802,14 @@ class PdfDocumentViewModel : ViewModel() {
         return map
     }
 
-    private suspend fun renderPageBitmap(index: Int, pxW: Int, pxH: Int): Bitmap =
+    private suspend fun renderPageBitmap(
+        index: Int,
+        pxW: Int,
+        pxH: Int,
+        generation: Int,
+    ): Bitmap =
         try {
-            renderWithPdfium(index, pxW, pxH)
+            renderWithPdfium(index, pxW, pxH, generation)
         } catch (t: Throwable) {
             Log.e(TAG, "pdfium render failed page=$index, falling back to pdfbox", t)
             PDFRenderer(requireNotNull(document)).renderImageWithDPI(index, RENDER_DPI)
@@ -780,8 +817,14 @@ class PdfDocumentViewModel : ViewModel() {
 
     // pdfium leaves empty pixels transparent and PDFs assume white paper, so
     // prefill white. It is single-page and not thread-safe, hence the mutex.
-    private suspend fun renderWithPdfium(index: Int, pxW: Int, pxH: Int): Bitmap =
+    private suspend fun renderWithPdfium(
+        index: Int,
+        pxW: Int,
+        pxH: Int,
+        generation: Int,
+    ): Bitmap =
         renderMutex.withLock {
+            check(generation == documentGeneration) { "文档已经切换" }
             val renderer = requireNotNull(pdfRenderer) { "renderer not open" }
             val bmp = Bitmap.createBitmap(pxW, pxH, Bitmap.Config.ARGB_8888)
             bmp.eraseColor(Color.WHITE)
@@ -808,6 +851,7 @@ class PdfDocumentViewModel : ViewModel() {
         outH: Int,
     ): Bitmap? {
         val doc = document ?: return null
+        val generation = documentGeneration
         if (pageIndex < 0 || pageIndex >= doc.numberOfPages) return null
         val bw = right - left
         val bh = bottom - top
@@ -823,6 +867,7 @@ class PdfDocumentViewModel : ViewModel() {
                 postTranslate(-left * (w / bw), -top * (h / bh))
             }
             renderMutex.withLock {
+                if (generation != documentGeneration) return@withLock null
                 val renderer = pdfRenderer ?: return@withLock null
                 val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                 bmp.eraseColor(Color.WHITE)
