@@ -17,9 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,11 +32,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -49,46 +42,23 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import compose.icons.TablerIcons
 import compose.icons.tablericons.Check
 import compose.icons.tablericons.Bug
 import compose.icons.tablericons.Bulb
 import compose.icons.tablericons.ChevronLeft
-import compose.icons.tablericons.CloudDownload
 import compose.icons.tablericons.ExternalLink
 import compose.icons.tablericons.Heart
-import compose.icons.tablericons.Refresh
-import SVS.pdfinspector.BuildConfig
-import SVS.pdfinspector.ReleaseInfo
-import SVS.pdfinspector.UpdateCheckResult
-import SVS.pdfinspector.UpdateChecker
 import SVS.pdfinspector.ui.theme.Accent
 import SVS.pdfinspector.ui.theme.Palettes
 import SVS.pdfinspector.ui.theme.ThemeMode
 import SVS.pdfinspector.ui.theme.ThemeState
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
-    val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
-    var updateState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
-    val checking = updateState is UpdateUiState.Checking
-    val checkUpdates = {
-        if (!checking) {
-            scope.launch {
-                updateState = UpdateUiState.Checking
-                updateState = when (val result = UpdateChecker.check(BuildConfig.VERSION_NAME)) {
-                    is UpdateCheckResult.Available -> UpdateUiState.Available(result.release)
-                    is UpdateCheckResult.UpToDate -> UpdateUiState.UpToDate(result.release.tagName)
-                    is UpdateCheckResult.Failed -> UpdateUiState.Failed(result.message)
-                }
-            }
-        }
-    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
@@ -195,63 +165,7 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
 
             item { HorizontalDivider(Modifier.padding(top = 8.dp)) }
             item { SectionLabel("更新") }
-            item {
-                ListItem(
-                    modifier = Modifier.clickable(enabled = !checking, onClick = checkUpdates),
-                    headlineContent = { Text("检查更新") },
-                    supportingContent = { UpdateStatus(updateState) },
-                    leadingContent = {
-                        Icon(TablerIcons.CloudDownload, contentDescription = null)
-                    },
-                    trailingContent = {
-                        if (checking) {
-                            CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                        } else {
-                            IconButton(onClick = checkUpdates) {
-                                Icon(TablerIcons.Refresh, contentDescription = "立即检查")
-                            }
-                        }
-                    },
-                )
-            }
-
-            val available = updateState as? UpdateUiState.Available
-            if (available != null) {
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Text(
-                            "版本 ${available.release.tagName}",
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        if (available.release.notes.isNotBlank()) {
-                            Text("版本说明", style = MaterialTheme.typography.labelLarge)
-                            Text(
-                                available.release.notes,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 8,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        FilledTonalButton(
-                            onClick = {
-                                uriHandler.openUri(
-                                    available.release.downloadUrl ?: available.release.releaseUrl,
-                                )
-                            },
-                        ) {
-                            Icon(TablerIcons.ExternalLink, contentDescription = null)
-                            Spacer(Modifier.size(8.dp))
-                            Text(if (available.release.downloadUrl != null) "下载 APK" else "查看版本")
-                        }
-                    }
-                }
-            }
+            item { OnlineUpdateSection() }
                 item { HorizontalDivider(Modifier.padding(top = 8.dp)) }
                 item { SectionLabel("支持与反馈") }
                 item {
@@ -313,31 +227,6 @@ private fun SectionLabel(text: String) {
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.primary,
     )
-}
-
-@Composable
-private fun UpdateStatus(state: UpdateUiState) {
-    val color = if (state is UpdateUiState.Failed) {
-        MaterialTheme.colorScheme.error
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val text = when (state) {
-        UpdateUiState.Idle -> "当前版本 ${BuildConfig.VERSION_NAME}"
-        UpdateUiState.Checking -> "正在连接 GitHub"
-        is UpdateUiState.UpToDate -> "已是最新版本 · ${state.latestVersion}"
-        is UpdateUiState.Available -> "发现新版本 ${state.release.tagName}"
-        is UpdateUiState.Failed -> state.message
-    }
-    Text(text, color = color)
-}
-
-private sealed interface UpdateUiState {
-    data object Idle : UpdateUiState
-    data object Checking : UpdateUiState
-    data class UpToDate(val latestVersion: String) : UpdateUiState
-    data class Available(val release: ReleaseInfo) : UpdateUiState
-    data class Failed(val message: String) : UpdateUiState
 }
 
 @Composable
