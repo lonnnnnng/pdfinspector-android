@@ -7,6 +7,8 @@ activityCompose = "1.9.3"
 composeBom = "2024.10.01"
 pdfbox = "2.0.27.0"
 json = "20240303"
+fragment = "1.8.5"
+readium = "2.3.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -22,6 +24,10 @@ androidx-material3 = { group = "androidx.compose.material3", name = "material3" 
 compose-icons-tabler = { group = "br.com.devsrsouza.compose.icons", name = "tabler-icons", version = "1.1.1" }
 pdfbox-android = { group = "com.tom-roush", name = "pdfbox-android", version.ref = "pdfbox" }
 json = { group = "org.json", name = "json", version.ref = "json" }
+androidx-fragment-ktx = { group = "androidx.fragment", name = "fragment-ktx", version.ref = "fragment" }
+readium-shared = { group = "org.readium.kotlin-toolkit", name = "readium-shared", version.ref = "readium" }
+readium-streamer = { group = "org.readium.kotlin-toolkit", name = "readium-streamer", version.ref = "readium" }
+readium-navigator = { group = "org.readium.kotlin-toolkit", name = "readium-navigator", version.ref = "readium" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

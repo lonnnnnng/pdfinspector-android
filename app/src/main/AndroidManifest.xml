@@ -28,6 +28,19 @@
                 <data android:mimeType="application/pdf" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".EbookActivity"
+            android:exported="true"
+            android:label="电子书阅读"
+            android:theme="@style/Theme.PdfInspector">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
         <receiver
             android:name=".UpdateInstallReceiver"
             android:exported="false" />

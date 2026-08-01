@@ -144,6 +144,10 @@ fun InspectorScreen(
     var showExitConfirmation by rememberSaveable { mutableStateOf(false) }
     var pendingMode by rememberSaveable { mutableStateOf(AppMode.EDIT) }
 
+    fun openEbookReader() {
+        context.startActivity(Intent(context, EbookActivity::class.java))
+    }
+
     LaunchedEffect(initialUri) {
         viewModel.loadReaderLibrary(context)
         if (initialUri != null) viewModel.open(context, initialUri, AppMode.READ)
@@ -306,6 +310,7 @@ fun InspectorScreen(
             history = viewModel.readerHistory,
             onOpenEdit = { pickPdf(AppMode.EDIT) },
             onOpenRead = { pickPdf(AppMode.READ) },
+            onOpenEbook = ::openEbookReader,
             onOpenHistory = { viewModel.openHistory(context, it) },
             onSettings = { showSettings = true },
         )
@@ -615,6 +620,7 @@ private fun HomeScreen(
     history: List<ReaderHistoryEntry>,
     onOpenEdit: () -> Unit,
     onOpenRead: () -> Unit,
+    onOpenEbook: () -> Unit,
     onOpenHistory: (ReaderHistoryEntry) -> Unit,
     onSettings: () -> Unit,
 ) {
@@ -721,6 +727,14 @@ private fun HomeScreen(
                             title = "进入阅读模式",
                             description = "连续滚动、搜索、目录、书签、缩略图和文本复制。",
                             onClick = onOpenRead,
+                        )
+                    }
+                    item {
+                        ModeCard(
+                            icon = { Icon(TablerIcons.FileText, contentDescription = null) },
+                            title = "进入电子书阅读",
+                            description = "阅读 EPUB、TXT，支持本地文件和在线地址。",
+                            onClick = onOpenEbook,
                         )
                     }
                     if (history.isNotEmpty()) {
