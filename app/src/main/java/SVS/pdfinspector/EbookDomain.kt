@@ -165,9 +165,16 @@ fun splitTxtParagraphs(text: String): List<String> = text
     .ifEmpty { listOf("") }
 
 fun txtTableOfContents(paragraphs: List<String>): List<Pair<Int, String>> {
-    val chapterPattern = Regex("^(第[^\\s]{1,20}[章节回部卷篇]|(?:Chapter|CHAPTER)\\s+\\d+|序章|序幕|尾声|结语).*")
+    val chapterPatterns = listOf(
+        Regex("^第\\s*[0-9０-９一二三四五六七八九十百千万零〇两]+\\s*[章节回部卷篇](?:$|[\\s:：、.．-]+.{1,24}$)"),
+        Regex("^(?i:chapter)\\s+(?:\\d+|[IVXLCDM]+)(?:$|[\\s:：.．-]+.{1,32}$)"),
+        Regex("^(?:序章|序幕|楔子|前言|尾声|结语|后记)(?:$|[\\s:：.．-]+.{1,24}$)"),
+    )
     return paragraphs.mapIndexedNotNull { index, paragraph ->
-        paragraph.takeIf { chapterPattern.matches(it) }?.let { index to it }
+        // long: 目录只接收短标题，并要求章节编号后有明确分隔，避免把“第一章第一段……”正文误判成章节。
+        paragraph.takeIf { title ->
+            title.length <= MAX_TXT_TOC_TITLE_CHARS && chapterPatterns.any { it.matches(title) }
+        }?.let { index to it }
     }
 }
 
@@ -182,6 +189,8 @@ fun searchEbookParagraphs(
         if (match < 0) null else EbookSearchResult(index, ebookSearchSnippet(paragraph, match, query.length))
     }
 }
+
+private const val MAX_TXT_TOC_TITLE_CHARS = 48
 
 private fun ebookSearchSnippet(text: String, matchStart: Int, matchLength: Int): String {
     val compact = text.replace(Regex("\\s+"), " ").trim()

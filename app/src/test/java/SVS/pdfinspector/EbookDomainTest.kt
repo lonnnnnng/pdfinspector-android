@@ -92,10 +92,18 @@ class EbookDomainTest {
     @Test
     fun txtTableOfContentsRecognizesChineseAndEnglishChapterHeadings() {
         val headings = txtTableOfContents(
-            listOf("序章", "正文", "Chapter 2 The Road", "尾声"),
+            listOf(
+                "序章",
+                "正文",
+                "第 1 章 起程",
+                "第一章第一段。这里是正文，不应进入目录。",
+                "Chapter IX The Mock Turtle's Story",
+                "Chapter house is a phrase in the body.",
+                "尾声",
+            ),
         )
 
-        assertEquals(listOf(0, 2, 3), headings.map { it.first })
+        assertEquals(listOf(0, 2, 4, 6), headings.map { it.first })
     }
 
     @Test

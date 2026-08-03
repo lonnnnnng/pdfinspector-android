@@ -38,18 +38,13 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import compose.icons.TablerIcons
 import compose.icons.tablericons.Check
-import compose.icons.tablericons.Bug
-import compose.icons.tablericons.Bulb
 import compose.icons.tablericons.ChevronLeft
-import compose.icons.tablericons.ExternalLink
-import compose.icons.tablericons.Heart
 import SVS.pdfinspector.ui.theme.Accent
 import SVS.pdfinspector.ui.theme.Palettes
 import SVS.pdfinspector.ui.theme.ThemeMode
@@ -58,8 +53,6 @@ import SVS.pdfinspector.ui.theme.ThemeState
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
-    val uriHandler = LocalUriHandler.current
-
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
@@ -166,57 +159,9 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
             item { HorizontalDivider(Modifier.padding(top = 8.dp)) }
             item { SectionLabel("更新") }
             item { OnlineUpdateSection() }
-                item { HorizontalDivider(Modifier.padding(top = 8.dp)) }
-                item { SectionLabel("支持与反馈") }
-                item {
-                    SupportItem(
-                        icon = TablerIcons.Bulb,
-                        title = "功能建议",
-                        subtitle = "在 GitHub 上提交改进建议",
-                        onClick = { uriHandler.openUri(FEATURE_URL) },
-                    )
-                }
-                item {
-                    SupportItem(
-                        icon = TablerIcons.Bug,
-                        title = "问题反馈",
-                        subtitle = "在 GitHub 上提交问题报告",
-                        onClick = { uriHandler.openUri(BUG_URL) },
-                    )
-                }
-                item {
-                    SupportItem(
-                        icon = TablerIcons.Heart,
-                        title = "赞助原作者",
-                        subtitle = "支持上游 PDF Inspector 项目",
-                        onClick = { uriHandler.openUri(SPONSOR_URL) },
-                    )
-                }
             }
         }
     }
-}
-
-@Composable
-private fun SupportItem(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit,
-) {
-    ListItem(
-        modifier = Modifier.clickable(onClick = onClick),
-        headlineContent = { Text(title) },
-        supportingContent = { Text(subtitle) },
-        leadingContent = { Icon(icon, contentDescription = null) },
-        trailingContent = {
-            Icon(
-                TablerIcons.ExternalLink,
-                contentDescription = "在浏览器中打开",
-                modifier = Modifier.size(18.dp),
-            )
-        },
-    )
 }
 
 @Composable
@@ -261,8 +206,3 @@ private fun Swatch(
         }
     }
 }
-
-private const val FEATURE_URL =
-    "https://github.com/lonnnnnng/pdfinspector-android/issues/new?labels=enhancement"
-private const val BUG_URL = "https://github.com/lonnnnnng/pdfinspector-android/issues/new?labels=bug"
-private const val SPONSOR_URL = "https://github.com/sponsors/shardulvs"

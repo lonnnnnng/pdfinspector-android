@@ -18,9 +18,11 @@ import java.net.URI
 import java.net.URLDecoder
 import java.security.MessageDigest
 import javax.net.ssl.HttpsURLConnection
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -81,8 +83,12 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
     private val streamer = Streamer(application)
     private var currentPublication: Publication? = null
     private var openJob: Job? = null
+    private var openGeneration = 0L
     private var searchJob: Job? = null
     private var searchGeneration = 0L
+    private var activePositionSourceId: String? = null
+    private var latestTxtParagraphIndex = 0
+    private var latestEpubLocator: Locator? = null
 
     var screen by mutableStateOf<EbookScreen>(EbookScreen.Library)
         private set
@@ -100,35 +106,39 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     fun openUri(activity: Activity, uri: Uri) {
-        openJob?.cancel()
+        val generation = beginOpenRequest()
         openJob = viewModelScope.launch {
             screen = EbookScreen.Loading("正在打开电子书…")
             val source = runCatching {
                 withContext(Dispatchers.IO) { cacheLocalSource(uri) }
             }.getOrElse {
-                screen = EbookScreen.Error(it.userFacingMessage("无法读取所选文件"))
+                if (generation == openGeneration) {
+                    screen = EbookScreen.Error(it.userFacingMessage("无法读取所选文件"))
+                }
                 return@launch
             }
-            openCachedSource(activity, source)
+            openCachedSource(activity, source, generation)
         }
     }
 
     fun openOnline(activity: Activity, rawUrl: String) {
+        val generation = beginOpenRequest()
         val url = normalizeHttpsEbookUrl(rawUrl)
         if (url == null) {
             screen = EbookScreen.Error("请输入有效的 HTTPS 电子书地址")
             return
         }
-        openJob?.cancel()
         openJob = viewModelScope.launch {
             screen = EbookScreen.Loading("正在下载电子书…")
             val source = runCatching {
                 withContext(Dispatchers.IO) { downloadOnlineSource(url) }
             }.getOrElse {
-                screen = EbookScreen.Error(it.userFacingMessage("在线电子书下载失败"))
+                if (generation == openGeneration) {
+                    screen = EbookScreen.Error(it.userFacingMessage("在线电子书下载失败"))
+                }
                 return@launch
             }
-            openCachedSource(activity, source)
+            openCachedSource(activity, source, generation)
         }
     }
 
@@ -139,7 +149,12 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun openCachedSource(activity: Activity, source: CachedEbookSource) {
+    private suspend fun openCachedSource(
+        activity: Activity,
+        source: CachedEbookSource,
+        generation: Long,
+    ) {
+        if (generation != openGeneration) return
         closeCurrentPublication()
         clearSearch()
         when (source.format) {
@@ -160,9 +175,16 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                 }.getOrElse {
-                    screen = EbookScreen.Error(it.userFacingMessage("TXT 文件解析失败"))
+                    if (generation == openGeneration) {
+                        screen = EbookScreen.Error(it.userFacingMessage("TXT 文件解析失败"))
+                    }
                     return
                 }
+                // long: 文件复制和解码期间用户可能又选了另一本书，旧结果不能覆盖当前打开请求。
+                if (generation != openGeneration) return
+                activePositionSourceId = document.sourceId
+                latestTxtParagraphIndex = document.initialParagraphIndex
+                latestEpubLocator = null
                 screen = EbookScreen.Txt(document)
                 recordHistory(source, document.title)
             }
@@ -174,7 +196,13 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
                         sender = activity,
                     ).getOrThrow()
                 }.getOrElse {
-                    screen = EbookScreen.Error(it.userFacingMessage("EPUB 文件解析失败"))
+                    if (generation == openGeneration) {
+                        screen = EbookScreen.Error(it.userFacingMessage("EPUB 文件解析失败"))
+                    }
+                    return
+                }
+                if (generation != openGeneration) {
+                    publication.close()
                     return
                 }
                 if (publication.isRestricted || !publication.conformsTo(Publication.Profile.EPUB)) {
@@ -187,6 +215,9 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
                     ?.locatorJson
                     ?.let { runCatching { Locator.fromJSON(JSONObject(it)) }.getOrNull() }
                 val title = publication.metadata.title.takeIf(String::isNotBlank) ?: source.title
+                activePositionSourceId = source.sourceId
+                latestTxtParagraphIndex = 0
+                latestEpubLocator = initialLocator
                 screen = EbookScreen.Epub(
                     EpubEbookDocument(
                         sourceId = source.sourceId,
@@ -203,7 +234,7 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun showLibrary() {
-        openJob?.cancel()
+        cancelOpenRequest()
         clearSearch()
         screen = EbookScreen.Library
     }
@@ -224,11 +255,13 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun saveTxtPosition(document: TxtEbookDocument, paragraphIndex: Int) {
+        val safeIndex = paragraphIndex.coerceAtLeast(0)
+        if (activePositionSourceId == document.sourceId) latestTxtParagraphIndex = safeIndex
         preferences.savePosition(
             EbookReadingPosition(
                 sourceId = document.sourceId,
                 format = EbookFormat.TXT,
-                paragraphIndex = paragraphIndex.coerceAtLeast(0),
+                paragraphIndex = safeIndex,
                 locatorJson = null,
                 updatedAt = System.currentTimeMillis(),
             ),
@@ -236,6 +269,7 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun saveEpubPosition(document: EpubEbookDocument, locator: Locator) {
+        if (activePositionSourceId == document.sourceId) latestEpubLocator = locator
         preferences.savePosition(
             EbookReadingPosition(
                 sourceId = document.sourceId,
@@ -247,11 +281,54 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    fun currentTxtPosition(document: TxtEbookDocument): Int =
+        if (activePositionSourceId == document.sourceId) {
+            latestTxtParagraphIndex
+        } else {
+            document.initialParagraphIndex
+        }
+
+    fun currentEpubLocator(document: EpubEbookDocument): Locator? =
+        if (activePositionSourceId == document.sourceId) {
+            latestEpubLocator
+        } else {
+            document.initialLocator
+        }
+
     fun searchTxt(document: TxtEbookDocument, query: String) {
-        cancelSearchJob()
+        val normalized = query.trim()
+        searchJob?.cancel()
+        val generation = ++searchGeneration
         epubSearchResults = emptyList()
-        txtSearchResults = searchEbookParagraphs(document.paragraphs, query).take(MAX_SEARCH_RESULTS)
+        txtSearchResults = emptyList()
         searchError = null
+        if (normalized.isEmpty()) {
+            searching = false
+            searchJob = null
+            return
+        }
+        searchJob = viewModelScope.launch {
+            searching = true
+            try {
+                delay(SEARCH_DEBOUNCE_MS)
+                // long: 大型 TXT 的段落扫描属于 CPU 密集任务，必须离开主线程以保证输入和滚动响应。
+                val results = withContext(Dispatchers.Default) {
+                    searchEbookParagraphs(document.paragraphs, normalized).take(MAX_SEARCH_RESULTS)
+                }
+                if (generation == searchGeneration) txtSearchResults = results
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                if (generation == searchGeneration) {
+                    searchError = error.userFacingMessage("TXT 搜索失败")
+                }
+            } finally {
+                if (generation == searchGeneration) {
+                    searching = false
+                    searchJob = null
+                }
+            }
+        }
     }
 
     fun searchEpub(document: EpubEbookDocument, query: String) {
@@ -268,33 +345,41 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
             searching = true
             searchError = null
             epubSearchResults = emptyList()
-            val iterator = document.publication.search(normalized).getOrNull()
-            if (iterator == null) {
-                if (generation == searchGeneration) {
-                    searching = false
-                    searchError = "这本 EPUB 不支持全文搜索"
-                    searchJob = null
-                }
-                return@launch
-            }
-            val results = mutableListOf<Locator>()
-            var failureMessage: String? = null
             try {
-                while (results.size < MAX_SEARCH_RESULTS) {
-                    val next = iterator.next()
-                    if (next.isFailure) {
-                        failureMessage = "EPUB 搜索过程中发生错误"
-                        break
+                delay(SEARCH_DEBOUNCE_MS)
+                val (results, failureMessage) = withContext(Dispatchers.IO) {
+                    val iterator = document.publication.search(normalized).getOrNull()
+                        ?: return@withContext emptyList<Locator>() to "这本 EPUB 不支持全文搜索"
+                    val matches = mutableListOf<Locator>()
+                    var failure: String? = null
+                    try {
+                        while (matches.size < MAX_SEARCH_RESULTS) {
+                            val next = iterator.next()
+                            if (next.isFailure) {
+                                failure = "EPUB 搜索过程中发生错误"
+                                break
+                            }
+                            val page = next.getOrNull() ?: break
+                            matches += page.locators.take(MAX_SEARCH_RESULTS - matches.size)
+                        }
+                    } finally {
+                        withContext(NonCancellable) { iterator.close() }
                     }
-                    val page = next.getOrNull() ?: break
-                    results += page.locators.take(MAX_SEARCH_RESULTS - results.size)
+                    matches to failure
                 }
-            } finally {
-                withContext(NonCancellable) { iterator.close() }
-                // long: 旧查询即使晚于新查询结束，也不能覆盖用户当前看到的搜索结果和加载状态。
+                // long: 查询切换后只允许最新一代结果更新界面，避免旧 EPUB 搜索晚到后闪回。
                 if (generation == searchGeneration) {
                     epubSearchResults = results
                     searchError = failureMessage
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                if (generation == searchGeneration) {
+                    searchError = error.userFacingMessage("EPUB 搜索失败")
+                }
+            } finally {
+                if (generation == searchGeneration) {
                     searching = false
                     searchJob = null
                 }
@@ -455,6 +540,18 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
         currentPublication = null
     }
 
+    private fun beginOpenRequest(): Long {
+        openJob?.cancel()
+        openJob = null
+        return ++openGeneration
+    }
+
+    private fun cancelOpenRequest() {
+        openGeneration += 1
+        openJob?.cancel()
+        openJob = null
+    }
+
     private fun cancelSearchJob() {
         searchGeneration += 1
         searchJob?.cancel()
@@ -463,6 +560,8 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        cancelOpenRequest()
+        cancelSearchJob()
         closeCurrentPublication()
         super.onCleared()
     }
@@ -478,6 +577,7 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
         const val MAX_EBOOK_BYTES = 100L * 1024L * 1024L
         const val MAX_TXT_BYTES = 20L * 1024L * 1024L
         const val MAX_SEARCH_RESULTS = 200
+        const val SEARCH_DEBOUNCE_MS = 300L
         const val MAX_REDIRECTS = 5
         const val CONNECT_TIMEOUT_MS = 15_000
         const val READ_TIMEOUT_MS = 30_000
