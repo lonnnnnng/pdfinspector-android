@@ -19,6 +19,8 @@ class EbookActivity : FragmentActivity() {
         super.onCreate(null)
         enableEdgeToEdge()
         val initialUri = intent?.data
+        // long: 仅在系统重建 Activity 时恢复最近阅读，正常进入电子书入口仍先展示书架。
+        val restoreHistory = savedInstanceState != null
         setContent {
             val themeState = rememberThemeState()
             InspectorTheme(
@@ -33,6 +35,7 @@ class EbookActivity : FragmentActivity() {
                     activity = this,
                     viewModel = viewModel,
                     initialUri = initialUri,
+                    restoreHistory = restoreHistory,
                     onChooseFile = {
                         launcher.launch(
                             arrayOf("application/epub+zip", "text/plain", "application/octet-stream"),

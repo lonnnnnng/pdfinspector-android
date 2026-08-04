@@ -121,19 +121,49 @@ class EbookDomainTest {
     }
 
     @Test
+    fun txtParagraphPositionStaysWithinDocumentBounds() {
+        assertEquals(0, clampTxtParagraphIndex(-4, 0))
+        assertEquals(0, clampTxtParagraphIndex(-4, 3))
+        assertEquals(2, clampTxtParagraphIndex(99, 3))
+        assertEquals(1, clampTxtParagraphIndex(1, 3))
+        assertEquals(0f, txtReadingProgress(-4, 0))
+        assertEquals(0.5f, txtReadingProgress(1, 3))
+        assertEquals(1f, txtReadingProgress(99, 3))
+        assertEquals(0f, normalizedEbookProgress(-1.0))
+        assertEquals(1f, normalizedEbookProgress(2.0))
+        assertNull(normalizedEbookProgress(Double.NaN))
+    }
+
+    @Test
     fun ebookHistoryMovesReopenedBookToFront() {
         val existing = listOf(
-            EbookHistoryEntry("content://books/a", "A", EbookFormat.EPUB, EbookSourceKind.LOCAL, 10L),
+            EbookHistoryEntry(
+                "content://books/a",
+                "A",
+                EbookFormat.EPUB,
+                EbookSourceKind.LOCAL,
+                10L,
+                progress = 0.42f,
+            ),
             EbookHistoryEntry("https://example.com/b.txt", "B", EbookFormat.TXT, EbookSourceKind.ONLINE, 9L),
         )
 
         val merged = mergeEbookHistory(
             existing,
-            EbookHistoryEntry("content://books/a", "A 新标题", EbookFormat.EPUB, EbookSourceKind.LOCAL, 20L),
+            EbookHistoryEntry(
+                "content://books/a",
+                "A 新标题",
+                EbookFormat.EPUB,
+                EbookSourceKind.LOCAL,
+                20L,
+                cacheFileName = "local-a.epub",
+            ),
         )
 
         assertEquals(listOf("content://books/a", "https://example.com/b.txt"), merged.map { it.sourceId })
         assertEquals("A 新标题", merged.first().title)
+        assertEquals("local-a.epub", merged.first().cacheFileName)
+        assertEquals(0.42f, merged.first().progress)
         assertTrue(mergeEbookHistory(existing, existing.first(), limit = 0).isEmpty())
     }
 

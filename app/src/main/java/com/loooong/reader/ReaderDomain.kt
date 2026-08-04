@@ -38,14 +38,22 @@ internal fun mergeReadingHistory(
     existing: List<ReaderHistoryEntry>,
     latest: ReaderHistoryEntry,
     limit: Int = 20,
-): List<ReaderHistoryEntry> =
+): List<ReaderHistoryEntry> = if (limit <= 0) {
+    emptyList()
+} else {
     buildList {
         add(latest)
         existing.asSequence()
             .filterNot { it.uri == latest.uri }
-            .take((limit - 1).coerceAtLeast(0))
+            .take(limit - 1)
             .forEach(::add)
     }
+}
+
+internal fun removeReadingHistory(
+    existing: List<ReaderHistoryEntry>,
+    uri: String,
+): List<ReaderHistoryEntry> = existing.filterNot { it.uri == uri }
 
 internal fun togglePageBookmark(existing: Set<Int>, pageIndex: Int): Set<Int> =
     if (pageIndex in existing) existing - pageIndex else existing + pageIndex
@@ -99,8 +107,18 @@ class ReaderPreferences(context: Context) {
 
     fun record(entry: ReaderHistoryEntry) {
         val merged = mergeReadingHistory(loadHistory(), entry)
+        saveHistory(merged)
+    }
+
+    fun removeHistory(uri: String) {
+        saveHistory(removeReadingHistory(loadHistory(), uri))
+        val root = bookmarkRoot().apply { remove(uri) }
+        preferences.edit { putString(KEY_BOOKMARKS, root.toString()) }
+    }
+
+    private fun saveHistory(entries: List<ReaderHistoryEntry>) {
         val array = JSONArray()
-        merged.forEach { item ->
+        entries.forEach { item ->
             array.put(
                 JSONObject()
                     .put("uri", item.uri)

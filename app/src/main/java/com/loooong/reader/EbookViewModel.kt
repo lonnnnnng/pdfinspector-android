@@ -143,10 +143,39 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openHistory(activity: Activity, entry: EbookHistoryEntry) {
-        when (entry.sourceKind) {
-            EbookSourceKind.LOCAL -> openUri(activity, entry.sourceId.toUri())
-            EbookSourceKind.ONLINE -> openOnline(activity, entry.sourceId)
+        val generation = beginOpenRequest()
+        openJob = viewModelScope.launch {
+            screen = EbookScreen.Loading("正在恢复上次阅读…")
+            // long: 最近阅读优先使用应用内副本，原文件移动、授权失效或网络断开时仍能继续阅读。
+            val source = withContext(Dispatchers.IO) { cachedHistorySource(entry) }
+                ?: runCatching {
+                    withContext(Dispatchers.IO) {
+                        when (entry.sourceKind) {
+                            EbookSourceKind.LOCAL -> cacheLocalSource(entry.sourceId.toUri())
+                            EbookSourceKind.ONLINE -> downloadOnlineSource(entry.sourceId)
+                        }
+                    }
+                }.getOrElse {
+                    if (generation == openGeneration) {
+                        screen = EbookScreen.Error(it.userFacingMessage("最近阅读的电子书已无法打开"))
+                    }
+                    return@launch
+                }
+            openCachedSource(activity, source, generation)
         }
+    }
+
+    fun restoreLastOpened(activity: Activity) {
+        if (screen !is EbookScreen.Library) return
+        history.firstOrNull()?.let { openHistory(activity, it) }
+    }
+
+    fun removeHistory(entry: EbookHistoryEntry) {
+        preferences.removeHistory(entry.sourceId)
+        preferences.removePosition(entry.sourceId)
+        history = preferences.loadHistory()
+        // long: 移除书架记录后同步回收本地副本，避免用户以为删除成功但存储仍被占用。
+        pruneEbookCache(history.mapNotNull { it.cacheFileName })
     }
 
     private suspend fun openCachedSource(
@@ -171,7 +200,7 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
                             title = source.title,
                             paragraphs = paragraphs,
                             initialParagraphIndex = saved?.paragraphIndex
-                                ?.coerceIn(0, (paragraphs.size - 1).coerceAtLeast(0)) ?: 0,
+                                ?.let { clampTxtParagraphIndex(it, paragraphs.size) } ?: 0,
                         )
                     }
                 }.getOrElse {
@@ -186,7 +215,11 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
                 latestTxtParagraphIndex = document.initialParagraphIndex
                 latestEpubLocator = null
                 screen = EbookScreen.Txt(document)
-                recordHistory(source, document.title)
+                recordHistory(
+                    source,
+                    document.title,
+                    txtReadingProgress(document.initialParagraphIndex, document.paragraphs.size),
+                )
             }
             EbookFormat.EPUB -> {
                 val publication = runCatching {
@@ -228,7 +261,7 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
                         tableOfContents = flattenTableOfContents(publication),
                     ),
                 )
-                recordHistory(source, title)
+                recordHistory(source, title, normalizedEbookProgress(initialLocator?.locations?.totalProgression))
             }
         }
     }
@@ -236,6 +269,7 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
     fun showLibrary() {
         cancelOpenRequest()
         clearSearch()
+        history = preferences.loadHistory()
         screen = EbookScreen.Library
     }
 
@@ -255,7 +289,7 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun saveTxtPosition(document: TxtEbookDocument, paragraphIndex: Int) {
-        val safeIndex = paragraphIndex.coerceAtLeast(0)
+        val safeIndex = clampTxtParagraphIndex(paragraphIndex, document.paragraphs.size)
         if (activePositionSourceId == document.sourceId) latestTxtParagraphIndex = safeIndex
         preferences.savePosition(
             EbookReadingPosition(
@@ -265,6 +299,10 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
                 locatorJson = null,
                 updatedAt = System.currentTimeMillis(),
             ),
+        )
+        preferences.updateHistoryProgress(
+            document.sourceId,
+            txtReadingProgress(safeIndex, document.paragraphs.size),
         )
     }
 
@@ -279,6 +317,9 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
                 updatedAt = System.currentTimeMillis(),
             ),
         )
+        normalizedEbookProgress(locator.locations.totalProgression)?.let { progress ->
+            preferences.updateHistoryProgress(document.sourceId, progress)
+        }
     }
 
     fun currentTxtPosition(document: TxtEbookDocument): Int =
@@ -394,7 +435,7 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
         epubSearchResults = emptyList()
     }
 
-    private fun recordHistory(source: CachedEbookSource, title: String) {
+    private fun recordHistory(source: CachedEbookSource, title: String, progress: Float?) {
         preferences.recordHistory(
             EbookHistoryEntry(
                 sourceId = source.sourceId,
@@ -402,9 +443,33 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
                 format = source.format,
                 sourceKind = source.sourceKind,
                 updatedAt = System.currentTimeMillis(),
+                cacheFileName = source.file.name,
+                progress = progress,
             ),
         )
         history = preferences.loadHistory()
+        pruneEbookCache(history.mapNotNull { it.cacheFileName })
+    }
+
+    private fun cachedHistorySource(entry: EbookHistoryEntry): CachedEbookSource? {
+        val cacheName = entry.cacheFileName ?: return null
+        if (File(cacheName).name != cacheName) return null
+        val file = File(ebookCacheDirectory(), cacheName)
+        if (!file.isFile || file.length() > MAX_EBOOK_BYTES) return null
+        val format = when (entry.format) {
+            EbookFormat.TXT -> EbookFormat.TXT.takeIf { file.length() <= MAX_TXT_BYTES }
+            EbookFormat.EPUB -> EbookFormat.EPUB.takeIf {
+                inspectEpubArchive(file) == EpubArchiveStatus.VALID
+            }
+        } ?: return null
+        return CachedEbookSource(
+            sourceId = entry.sourceId,
+            sourceKind = entry.sourceKind,
+            title = entry.title,
+            mimeType = null,
+            file = file,
+            format = format,
+        )
     }
 
     private fun cacheLocalSource(uri: Uri): CachedEbookSource {
@@ -416,6 +481,19 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
         val mimeType = resolver.getType(uri)
         val extension = title.substringAfterLast('.', missingDelimiterValue = "").lowercase()
         val target = ebookCacheFile("local-${sha256(uri.toString())}", extension)
+        if (target.isFile && target.length() <= MAX_EBOOK_BYTES) {
+            val cachedFormat = runCatching { detectEbookFile(target, title, mimeType) }.getOrNull()
+            if (cachedFormat != null) {
+                return CachedEbookSource(
+                    uri.toString(),
+                    EbookSourceKind.LOCAL,
+                    title,
+                    mimeType,
+                    target,
+                    cachedFormat,
+                )
+            }
+        }
         resolver.openInputStream(uri)?.use { input ->
             copyWithLimit(input, target, MAX_EBOOK_BYTES)
         } ?: error("系统文件提供商没有返回可读内容")
@@ -451,6 +529,19 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
                 val sourceTitle = onlineFileName(currentUrl)
                 val extension = sourceTitle.substringAfterLast('.', missingDelimiterValue = "").lowercase()
                 val target = ebookCacheFile("online-${sha256(url)}", extension)
+                if (target.isFile && target.length() <= MAX_EBOOK_BYTES) {
+                    val cachedFormat = runCatching { detectEbookFile(target, sourceTitle, connection.contentType) }.getOrNull()
+                    if (cachedFormat != null) {
+                        return CachedEbookSource(
+                            url,
+                            EbookSourceKind.ONLINE,
+                            sourceTitle,
+                            connection.contentType,
+                            target,
+                            cachedFormat,
+                        )
+                    }
+                }
                 connection.inputStream.use { input -> copyWithLimit(input, target, MAX_EBOOK_BYTES) }
                 val mimeType = connection.contentType
                 val format = detectEbookFile(target, sourceTitle, mimeType)
@@ -484,10 +575,39 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun ebookCacheDirectory(): File =
+        // long: 电子书副本承担离线恢复职责，放在 filesDir 避免系统按普通临时缓存随时清理。
+        File(getApplication<Application>().filesDir, "ebooks").apply { mkdirs() }
+
     private fun ebookCacheFile(stem: String, extension: String): File {
-        val directory = File(getApplication<Application>().cacheDir, "ebooks").apply { mkdirs() }
+        val directory = ebookCacheDirectory()
         val safeExtension = extension.takeIf { it.matches(Regex("[a-z0-9]{1,8}")) }
         return File(directory, stem + safeExtension?.let { ".$it" }.orEmpty())
+    }
+
+    private fun pruneEbookCache(historyNames: List<String>) {
+        val directory = ebookCacheDirectory()
+        val filesByName = directory.listFiles()
+            ?.filter(File::isFile)
+            ?.associateBy(File::getName)
+            .orEmpty()
+            .toMutableMap()
+        val referencedNames = historyNames.toSet()
+        filesByName.values.filter { it.name !in referencedNames }.forEach { file ->
+            file.delete()
+            filesByName.remove(file.name)
+        }
+
+        var totalBytes = filesByName.values.sumOf(File::length)
+        val currentName = historyNames.firstOrNull()
+        // long: 超过上限时先回收最旧书籍，当前书即使较大也必须保留，避免刚打开就失去离线副本。
+        historyNames.asReversed().forEach { name ->
+            if (totalBytes <= MAX_EBOOK_CACHE_BYTES || name == currentName) return@forEach
+            filesByName.remove(name)?.let { file ->
+                val fileBytes = file.length()
+                if (file.delete()) totalBytes -= fileBytes
+            }
+        }
     }
 
     private fun copyWithLimit(input: java.io.InputStream, target: File, limit: Long) {
@@ -575,6 +695,7 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val MAX_EBOOK_BYTES = 100L * 1024L * 1024L
+        const val MAX_EBOOK_CACHE_BYTES = 512L * 1024L * 1024L
         const val MAX_TXT_BYTES = 20L * 1024L * 1024L
         const val MAX_SEARCH_RESULTS = 200
         const val SEARCH_DEBOUNCE_MS = 300L

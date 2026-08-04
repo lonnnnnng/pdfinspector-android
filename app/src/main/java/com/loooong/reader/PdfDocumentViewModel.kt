@@ -208,6 +208,12 @@ class PdfDocumentViewModel : ViewModel() {
         open(context, entry.uri.toUri(), AppMode.READ, entry.pageIndex)
     }
 
+    fun removeReaderHistory(context: Context, entry: ReaderHistoryEntry) {
+        val preferences = ReaderPreferences(context)
+        preferences.removeHistory(entry.uri)
+        readerHistory = preferences.loadHistory()
+    }
+
     fun updateReaderPosition(context: Context, pageIndex: Int) {
         if (state.mode != AppMode.READ || pageIndex !in 0 until state.pageCount) return
         if (state.pageIndex == pageIndex) return

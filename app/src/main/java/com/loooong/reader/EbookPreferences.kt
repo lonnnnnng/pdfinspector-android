@@ -30,6 +30,8 @@ data class EbookHistoryEntry(
     val format: EbookFormat,
     val sourceKind: EbookSourceKind,
     val updatedAt: Long,
+    val cacheFileName: String? = null,
+    val progress: Float? = null,
 )
 
 internal fun mergeEbookHistory(
@@ -39,8 +41,14 @@ internal fun mergeEbookHistory(
 ): List<EbookHistoryEntry> = if (limit <= 0) {
     emptyList()
 } else {
+    val previous = existing.firstOrNull { it.sourceId == latest.sourceId }
+    val mergedLatest = if (latest.progress == null && previous?.progress != null) {
+        latest.copy(progress = previous.progress)
+    } else {
+        latest
+    }
     buildList {
-        add(latest)
+        add(mergedLatest)
         existing.asSequence()
             .filterNot { it.sourceId == latest.sourceId }
             .take(limit - 1)
@@ -65,6 +73,11 @@ class EbookPreferences(context: Context) {
                             format = EbookFormat.valueOf(item.getString("format")),
                             sourceKind = EbookSourceKind.valueOf(item.getString("sourceKind")),
                             updatedAt = item.optLong("updatedAt", 0L),
+                            cacheFileName = item.optString("cacheFileName").takeIf { it.isNotBlank() },
+                            progress = item.optDouble("progress", Double.NaN)
+                                .takeUnless(Double::isNaN)
+                                ?.toFloat()
+                                ?.coerceIn(0f, 1f),
                         ),
                     )
                 }
@@ -74,15 +87,41 @@ class EbookPreferences(context: Context) {
 
     fun recordHistory(entry: EbookHistoryEntry) {
         val merged = mergeEbookHistory(loadHistory(), entry)
+        saveHistory(merged)
+    }
+
+    fun removeHistory(sourceId: String) {
+        saveHistory(loadHistory().filterNot { it.sourceId == sourceId })
+    }
+
+    fun removePosition(sourceId: String) {
+        val root = runCatching {
+            JSONObject(preferences.getString(KEY_POSITIONS, null) ?: "{}")
+        }.getOrElse { JSONObject() }
+        root.remove(sourceId)
+        preferences.edit { putString(KEY_POSITIONS, root.toString()) }
+    }
+
+    fun updateHistoryProgress(sourceId: String, progress: Float) {
+        saveHistory(
+            loadHistory().map { entry ->
+                if (entry.sourceId == sourceId) entry.copy(progress = progress.coerceIn(0f, 1f)) else entry
+            },
+        )
+    }
+
+    private fun saveHistory(entries: List<EbookHistoryEntry>) {
         val array = JSONArray()
-        merged.forEach { item ->
+        entries.forEach { item ->
             array.put(
                 JSONObject()
                     .put("sourceId", item.sourceId)
                     .put("title", item.title)
                     .put("format", item.format.name)
                     .put("sourceKind", item.sourceKind.name)
-                    .put("updatedAt", item.updatedAt),
+                    .put("updatedAt", item.updatedAt)
+                    .put("cacheFileName", item.cacheFileName)
+                    .put("progress", item.progress),
             )
         }
         preferences.edit { putString(KEY_HISTORY, array.toString()) }

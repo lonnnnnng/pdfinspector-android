@@ -1,6 +1,7 @@
 package com.loooong.reader.ui
 
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -37,6 +38,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -53,6 +55,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -93,6 +96,7 @@ import compose.icons.tablericons.CloudDownload
 import compose.icons.tablericons.FileText
 import compose.icons.tablericons.Search
 import compose.icons.tablericons.Settings
+import compose.icons.tablericons.Trash
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -124,11 +128,14 @@ fun EbookApp(
     activity: EbookActivity,
     viewModel: EbookViewModel,
     initialUri: android.net.Uri?,
+    restoreHistory: Boolean,
     onChooseFile: () -> Unit,
 ) {
-    LaunchedEffect(initialUri) {
+    LaunchedEffect(initialUri, restoreHistory) {
         if (initialUri != null && viewModel.screen is EbookScreen.Library) {
             viewModel.openUri(activity, initialUri)
+        } else if (initialUri == null && restoreHistory) {
+            viewModel.restoreLastOpened(activity)
         }
     }
 
@@ -145,6 +152,7 @@ fun EbookApp(
             history = viewModel.history,
             onChooseFile = onChooseFile,
             onOpenHistory = { viewModel.openHistory(activity, it) },
+            onRemoveHistory = { viewModel.removeHistory(it) },
             onOpenOnline = { viewModel.openOnline(activity, it) },
             onBack = { activity.finish() },
         )
@@ -154,6 +162,7 @@ fun EbookApp(
             error = screen.message,
             onChooseFile = onChooseFile,
             onOpenHistory = { viewModel.openHistory(activity, it) },
+            onRemoveHistory = { viewModel.removeHistory(it) },
             onOpenOnline = { viewModel.openOnline(activity, it) },
             onBack = { activity.finish() },
         )
@@ -188,10 +197,12 @@ private fun EbookHomeScreen(
     error: String? = null,
     onChooseFile: () -> Unit,
     onOpenHistory: (EbookHistoryEntry) -> Unit,
+    onRemoveHistory: (EbookHistoryEntry) -> Unit,
     onOpenOnline: (String) -> Unit,
     onBack: () -> Unit,
 ) {
     var onlineUrl by remember { mutableStateOf("") }
+    var pendingDelete by remember { mutableStateOf<EbookHistoryEntry?>(null) }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -289,15 +300,42 @@ private fun EbookHomeScreen(
                     Text("最近阅读", style = MaterialTheme.typography.titleMedium)
                 }
                 items(history, key = { it.sourceId }) { entry ->
-                    EbookHistoryRow(entry = entry, onClick = { onOpenHistory(entry) })
+                    EbookHistoryRow(
+                        entry = entry,
+                        onClick = { onOpenHistory(entry) },
+                        onDelete = { pendingDelete = entry },
+                    )
                 }
             }
         }
     }
+
+    pendingDelete?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("移除最近阅读") },
+            text = { Text("将移除书架记录、阅读进度和本地缓存，不会删除原始文件。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDelete = null
+                        onRemoveHistory(entry)
+                    },
+                ) { Text("移除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+            },
+        )
+    }
 }
 
 @Composable
-private fun EbookHistoryRow(entry: EbookHistoryEntry, onClick: () -> Unit) {
+private fun EbookHistoryRow(
+    entry: EbookHistoryEntry,
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
+) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -308,7 +346,14 @@ private fun EbookHistoryRow(entry: EbookHistoryEntry, onClick: () -> Unit) {
             leadingContent = { Icon(TablerIcons.Bookmarks, contentDescription = null) },
             headlineContent = { Text(entry.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             supportingContent = {
-                Text(if (entry.format == EbookFormat.EPUB) "EPUB · 最近阅读" else "TXT · 最近阅读")
+                val format = if (entry.format == EbookFormat.EPUB) "EPUB" else "TXT"
+                val progress = entry.progress?.let { " · ${(it * 100).roundToInt()}%" }.orEmpty()
+                Text("$format$progress")
+            },
+            trailingContent = {
+                IconButton(onClick = onDelete) {
+                    Icon(TablerIcons.Trash, contentDescription = "移除${entry.title}")
+                }
             },
         )
     }
@@ -553,7 +598,7 @@ private fun EpubReaderScreen(
     if (activity != null && containerReady && !inspectionMode) {
         DisposableEffect(document.sourceId, activity, containerReady, mountAttempt) {
             val fragmentManager = activity.supportFragmentManager
-            val mountedNavigator = runCatching {
+            val mountResult = runCatching {
                 fragmentManager.fragmentFactory = document.navigatorFactory.createFragmentFactory(
                     initialLocator = currentLocator ?: document.initialLocator,
                     initialPreferences = viewModel.settings.toReadiumPreferences(systemDark),
@@ -567,8 +612,12 @@ private fun EpubReaderScreen(
                     }
                     fragmentManager.findFragmentByTag(EPUB_NAVIGATOR_TAG) as? EpubNavigatorFragment
                 }
-            }.getOrElse {
-                null
+            }
+            val mountedNavigator = mountResult.getOrNull()
+            val mountError = mountResult.exceptionOrNull()
+            if (mountError != null) {
+                // long: Readium 的异常细节保留在日志中便于定位，界面只呈现稳定的中文恢复入口。
+                Log.e(EPUB_READER_LOG_TAG, "Readium 正文挂载失败", mountError)
             }
             navigator = mountedNavigator
             navigatorMountError = if (mountedNavigator == null) "正文加载失败，请重试" else null
@@ -1233,4 +1282,5 @@ private fun View.disableReaderOverscroll() {
 }
 
 private const val EPUB_NAVIGATOR_TAG = "ebook_epub_navigator"
+private const val EPUB_READER_LOG_TAG = "EbookReader"
 private const val POSITION_SAVE_DEBOUNCE_MS = 700L

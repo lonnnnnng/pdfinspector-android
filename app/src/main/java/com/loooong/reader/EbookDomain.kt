@@ -44,6 +44,15 @@ data class EbookReadingPosition(
         .toString()
 }
 
+internal fun clampTxtParagraphIndex(index: Int, paragraphCount: Int): Int =
+    if (paragraphCount <= 0) 0 else index.coerceIn(0, paragraphCount - 1)
+
+internal fun txtReadingProgress(index: Int, paragraphCount: Int): Float =
+    if (paragraphCount <= 1) 0f else clampTxtParagraphIndex(index, paragraphCount).toFloat() / (paragraphCount - 1)
+
+internal fun normalizedEbookProgress(progress: Double?): Float? =
+    progress?.takeIf(Double::isFinite)?.toFloat()?.coerceIn(0f, 1f)
+
 fun ebookReadingPositionFromJson(raw: String): EbookReadingPosition? = runCatching {
     val json = JSONObject(raw)
     EbookReadingPosition(

@@ -29,14 +29,14 @@ class OnlineUpdaterTest {
     @Test
     fun keepsApkAssetNameAndFallsBackToSafeVersionName() {
         assertEquals(
-            "pdfinspector-0.6.0.apk",
+            "reader-0.6.0.apk",
             updateApkFileName(
-                "https://github.com/example/releases/download/v0.6.0/pdfinspector-0.6.0.apk?download=1",
+                "https://github.com/example/releases/download/v0.6.0/reader-0.6.0.apk?download=1",
                 "v0.6.0",
             ),
         )
         assertEquals(
-            "pdfinspector-v0.6.0-beta_1.apk",
+            "reader-v0.6.0-beta_1.apk",
             updateApkFileName("https://example.com/download/latest", "v0.6.0-beta+1"),
         )
     }

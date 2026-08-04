@@ -94,6 +94,7 @@ import compose.icons.tablericons.ChevronRight
 import compose.icons.tablericons.Edit
 import compose.icons.tablericons.History
 import compose.icons.tablericons.Settings
+import compose.icons.tablericons.Trash
 import com.loooong.reader.engine.NodeKind
 import com.loooong.reader.engine.findNode
 import com.loooong.reader.ui.Dock
@@ -314,6 +315,7 @@ fun InspectorScreen(
             onOpenRead = { pickPdf(AppMode.READ) },
             onOpenEbook = ::openEbookReader,
             onOpenHistory = { viewModel.openHistory(context, it) },
+            onRemoveHistory = { viewModel.removeReaderHistory(context, it) },
             onSettings = { showSettings = true },
         )
     }
@@ -624,8 +626,10 @@ private fun HomeScreen(
     onOpenRead: () -> Unit,
     onOpenEbook: () -> Unit,
     onOpenHistory: (ReaderHistoryEntry) -> Unit,
+    onRemoveHistory: (ReaderHistoryEntry) -> Unit,
     onSettings: () -> Unit,
 ) {
+    var pendingHistoryRemoval by remember { mutableStateOf<ReaderHistoryEntry?>(null) }
     Column(Modifier.fillMaxSize()) {
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -741,12 +745,35 @@ private fun HomeScreen(
                             }
                         }
                         items(history, key = { it.uri }) { entry ->
-                            HistoryItem(entry = entry, onClick = { onOpenHistory(entry) })
+                            HistoryItem(
+                                entry = entry,
+                                onClick = { onOpenHistory(entry) },
+                                onDelete = { pendingHistoryRemoval = entry },
+                            )
                         }
                     }
                 }
             }
         }
+    }
+
+    pendingHistoryRemoval?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { pendingHistoryRemoval = null },
+            title = { Text("移除阅读历史") },
+            text = { Text("将移除该 PDF 的阅读记录和书签，不会删除原始文件。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingHistoryRemoval = null
+                        onRemoveHistory(entry)
+                    },
+                ) { Text("移除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingHistoryRemoval = null }) { Text("取消") }
+            },
+        )
     }
 }
 
@@ -832,7 +859,11 @@ private fun CompactModeCard(
 }
 
 @Composable
-private fun HistoryItem(entry: ReaderHistoryEntry, onClick: () -> Unit) {
+private fun HistoryItem(
+    entry: ReaderHistoryEntry,
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
+) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -859,7 +890,9 @@ private fun HistoryItem(entry: ReaderHistoryEntry, onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Icon(TablerIcons.ChevronRight, contentDescription = "继续阅读")
+            IconButton(onClick = onDelete) {
+                Icon(TablerIcons.Trash, contentDescription = "移除${entry.title}")
+            }
         }
     }
 }

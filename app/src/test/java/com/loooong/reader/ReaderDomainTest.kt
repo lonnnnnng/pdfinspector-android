@@ -40,6 +40,19 @@ class ReaderDomainTest {
         assertEquals(20, merged.size)
         assertEquals("content://docs/new", merged.first().uri)
         assertFalse(merged.any { it.uri == "content://docs/19" })
+        assertTrue(mergeReadingHistory(existing, existing.first(), limit = 0).isEmpty())
+    }
+
+    @Test
+    fun readingHistoryRemovesOnlyTargetDocument() {
+        val existing = listOf(
+            ReaderHistoryEntry("content://docs/a", "A.pdf", 1, 100L),
+            ReaderHistoryEntry("content://docs/b", "B.pdf", 4, 90L),
+        )
+
+        val remaining = removeReadingHistory(existing, "content://docs/a")
+
+        assertEquals(listOf("content://docs/b"), remaining.map { it.uri })
     }
 
     @Test

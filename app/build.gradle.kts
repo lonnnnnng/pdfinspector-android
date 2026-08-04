@@ -11,16 +11,16 @@ val keystorePropertiesFile = rootProject.file("keystore.properties")
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) keystorePropertiesFile.inputStream().use { load(it) }
 }
-val releaseStoreFile = System.getenv("PDFINSPECTOR_KEYSTORE_FILE")
+val releaseStoreFile = System.getenv("READER_KEYSTORE_FILE")
     ?.takeIf { it.isNotBlank() }
     ?: keystoreProperties.getProperty("storeFile")
-val releaseStorePassword = System.getenv("PDFINSPECTOR_STORE_PASSWORD")
+val releaseStorePassword = System.getenv("READER_STORE_PASSWORD")
     ?.takeIf { it.isNotBlank() }
     ?: keystoreProperties.getProperty("storePassword")
-val releaseKeyAlias = System.getenv("PDFINSPECTOR_KEY_ALIAS")
+val releaseKeyAlias = System.getenv("READER_KEY_ALIAS")
     ?.takeIf { it.isNotBlank() }
     ?: keystoreProperties.getProperty("keyAlias")
-val releaseKeyPassword = System.getenv("PDFINSPECTOR_KEY_PASSWORD")
+val releaseKeyPassword = System.getenv("READER_KEY_PASSWORD")
     ?.takeIf { it.isNotBlank() }
     ?: keystoreProperties.getProperty("keyPassword")
 val hasReleaseSigning = listOf(
@@ -38,8 +38,8 @@ android {
         applicationId = "com.loooong.reader"
         minSdk = 26
         targetSdk = 35
-        versionCode = 18
-        versionName = "0.10.0"
+        versionCode = 19
+        versionName = "0.11.0"
     }
 
     dependenciesInfo {

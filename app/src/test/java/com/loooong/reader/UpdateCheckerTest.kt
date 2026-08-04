@@ -37,7 +37,7 @@ class UpdateCheckerTest {
                   "browser_download_url": "https://example.com/source.zip"
                 },
                 {
-                  "name": "pdfinspector-0.4.0.apk",
+                  "name": "reader-0.4.0.apk",
                   "content_type": "application/vnd.android.package-archive",
                   "browser_download_url": "https://example.com/app.apk"
                 }
