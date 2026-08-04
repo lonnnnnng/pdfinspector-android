@@ -11,12 +11,12 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.PdfInspector">
+        android:theme="@style/Theme.Reader">
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.PdfInspector">
+            android:theme="@style/Theme.Reader">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -32,7 +32,7 @@
             android:name=".EbookActivity"
             android:exported="true"
             android:label="电子书阅读"
-            android:theme="@style/Theme.PdfInspector">
+            android:theme="@style/Theme.Reader">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

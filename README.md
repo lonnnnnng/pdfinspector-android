@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="fastlane/metadata/android/en-US/images/icon.png" width="80" alt="PDF Inspector icon" />
+  <img src="fastlane/metadata/android/en-US/images/icon.png" width="80" alt="阅读图标" />
 </p>
 
-<h1 align="center">PDF Inspector</h1>
+<h1 align="center">阅读</h1>
 
 <p align="center">
   A DevTools-style element inspector and editor for PDFs on Android

@@ -31,15 +31,15 @@ val hasReleaseSigning = listOf(
 ).all { !it.isNullOrBlank() }
 
 android {
-    namespace = "SVS.pdfinspector"
+    namespace = "com.loooong.reader"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.lonnnnnng.pdfinspector"
+        applicationId = "com.loooong.reader"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
-        versionName = "0.9.0"
+        versionCode = 18
+        versionName = "0.10.0"
     }
 
     dependenciesInfo {
