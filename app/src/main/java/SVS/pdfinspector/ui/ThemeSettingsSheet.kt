@@ -134,7 +134,7 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         Accent.entries.forEach { accent ->
                             Swatch(
@@ -185,7 +185,7 @@ private fun Swatch(
     val ring = MaterialTheme.colorScheme.onSurface
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .size(48.dp)
             .alpha(if (enabled) 1f else 0.4f)
             .clip(CircleShape)
             .background(color)

@@ -6,23 +6,23 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 
-// 中性色表面保持稳定，只替换强调色角色，避免编辑器工具区因主题切换产生层级漂移。
+// long: 中性表面保持稳定，只替换强调色角色，避免编辑器工具区因主题切换产生层级漂移。
 private val BaseLight = lightColorScheme(
-    background = Color(0xFFF8F9FB),
-    onBackground = Color(0xFF1A1C1E),
-    surface = Color(0xFFF8F9FB),
-    onSurface = Color(0xFF1A1C1E),
-    surfaceVariant = Color(0xFFE1E2E8),
-    onSurfaceVariant = Color(0xFF44474E),
+    background = Color(0xFFF6F8F5),
+    onBackground = Color(0xFF1A1D1B),
+    surface = Color(0xFFF6F8F5),
+    onSurface = Color(0xFF1A1D1B),
+    surfaceVariant = Color(0xFFE1E7E2),
+    onSurfaceVariant = Color(0xFF454B47),
     surfaceContainerLowest = Color(0xFFFFFFFF),
-    surfaceContainerLow = Color(0xFFF2F3F5),
-    surfaceContainer = Color(0xFFECEDEF),
-    surfaceContainerHigh = Color(0xFFE6E8EA),
-    surfaceContainerHighest = Color(0xFFE1E2E4),
-    outline = Color(0xFF74777F),
-    outlineVariant = Color(0xFFC4C6CF),
-    inverseSurface = Color(0xFF2F3033),
-    inverseOnSurface = Color(0xFFF1F0F4),
+    surfaceContainerLow = Color(0xFFF0F3EF),
+    surfaceContainer = Color(0xFFEAEEEA),
+    surfaceContainerHigh = Color(0xFFE4E9E5),
+    surfaceContainerHighest = Color(0xFFDDE4DF),
+    outline = Color(0xFF747B76),
+    outlineVariant = Color(0xFFC3CBC5),
+    inverseSurface = Color(0xFF2E322F),
+    inverseOnSurface = Color(0xFFF0F2EF),
     error = Color(0xFFBA1A1A),
     onError = Color(0xFFFFFFFF),
     errorContainer = Color(0xFFFFDAD6),
@@ -30,21 +30,21 @@ private val BaseLight = lightColorScheme(
 )
 
 private val BaseDark = darkColorScheme(
-    background = Color(0xFF111318),
-    onBackground = Color(0xFFE2E2E6),
-    surface = Color(0xFF111318),
-    onSurface = Color(0xFFE2E2E6),
-    surfaceVariant = Color(0xFF44474E),
-    onSurfaceVariant = Color(0xFFC4C6CF),
-    surfaceContainerLowest = Color(0xFF0C0E13),
-    surfaceContainerLow = Color(0xFF191C20),
-    surfaceContainer = Color(0xFF1D2024),
-    surfaceContainerHigh = Color(0xFF282A2E),
-    surfaceContainerHighest = Color(0xFF333539),
-    outline = Color(0xFF8E9099),
-    outlineVariant = Color(0xFF44474E),
-    inverseSurface = Color(0xFFE2E2E6),
-    inverseOnSurface = Color(0xFF2F3033),
+    background = Color(0xFF111512),
+    onBackground = Color(0xFFE1E7E2),
+    surface = Color(0xFF111512),
+    onSurface = Color(0xFFE1E7E2),
+    surfaceVariant = Color(0xFF404842),
+    onSurfaceVariant = Color(0xFFC0C9C2),
+    surfaceContainerLowest = Color(0xFF0B0F0C),
+    surfaceContainerLow = Color(0xFF181D19),
+    surfaceContainer = Color(0xFF1C211D),
+    surfaceContainerHigh = Color(0xFF262C27),
+    surfaceContainerHighest = Color(0xFF313732),
+    outline = Color(0xFF8A938C),
+    outlineVariant = Color(0xFF404842),
+    inverseSurface = Color(0xFFE1E7E2),
+    inverseOnSurface = Color(0xFF2D322E),
     error = Color(0xFFFFB4AB),
     onError = Color(0xFF690005),
     errorContainer = Color(0xFF93000A),
@@ -63,11 +63,11 @@ private class AccentRoles(
 
 private fun rolesFor(accent: Accent, dark: Boolean): AccentRoles = when (accent) {
     Accent.TEAL -> if (!dark) AccentRoles(
-        Color(0xFF006B5B), Color(0xFFFFFFFF), Color(0xFF7DF8DD), Color(0xFF00201A),
-        Color(0xFF4A635C), Color(0xFF426277), Color(0xFF5DDBC1),
+        Color(0xFF174C3C), Color(0xFFFFFFFF), Color(0xFFD5E8DF), Color(0xFF09291F),
+        Color(0xFF52665D), Color(0xFFA5661A), Color(0xFF9BD3BD),
     ) else AccentRoles(
-        Color(0xFF5DDBC1), Color(0xFF00382F), Color(0xFF005144), Color(0xFF7DF8DD),
-        Color(0xFFB1CCC2), Color(0xFFAACBE3), Color(0xFF006B5B),
+        Color(0xFF9BD3BD), Color(0xFF00382C), Color(0xFF1D4E3F), Color(0xFFB7EFDA),
+        Color(0xFFB7CBBF), Color(0xFFF2B866), Color(0xFF174C3C),
     )
     Accent.BLUE -> if (!dark) AccentRoles(
         Color(0xFF215FA6), Color(0xFFFFFFFF), Color(0xFFD6E3FF), Color(0xFF001B3D),

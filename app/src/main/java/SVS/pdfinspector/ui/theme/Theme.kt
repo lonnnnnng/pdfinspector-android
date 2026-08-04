@@ -18,15 +18,15 @@ import androidx.core.view.WindowCompat
 private val InspectorShapes = Shapes(
     extraSmall = RoundedCornerShape(4.dp),
     small = RoundedCornerShape(8.dp),
-    medium = RoundedCornerShape(12.dp),
-    large = RoundedCornerShape(16.dp),
-    extraLarge = RoundedCornerShape(24.dp),
+    medium = RoundedCornerShape(8.dp),
+    large = RoundedCornerShape(8.dp),
+    extraLarge = RoundedCornerShape(12.dp),
 )
 
 @Composable
 fun InspectorTheme(
     mode: ThemeMode = ThemeMode.SYSTEM,
-    dynamicColor: Boolean = true,
+    dynamicColor: Boolean = false,
     accent: Accent = Accent.TEAL,
     content: @Composable () -> Unit,
 ) {
@@ -42,7 +42,7 @@ fun InspectorTheme(
             if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         else -> Palettes.scheme(accent, dark)
     }
-    // Edge-to-edge 下系统栏图标必须跟随主题，否则浅色背景上会出现低对比图标。
+    // long: Edge-to-edge 下系统栏图标必须跟随主题，否则浅色背景上会出现低对比图标。
     SideEffect {
         val window = (context as? Activity)?.window ?: return@SideEffect
         WindowCompat.getInsetsController(window, view).apply {

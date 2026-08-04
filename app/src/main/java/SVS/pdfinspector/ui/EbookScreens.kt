@@ -1,9 +1,13 @@
 package SVS.pdfinspector.ui
 
 import android.os.Bundle
+import android.view.View
+import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalOverscrollConfiguration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -17,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -31,7 +36,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -52,6 +56,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -209,12 +214,15 @@ private fun EbookHomeScreen(
         ) {
             item {
                 Surface(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 96.dp)
+                        .clickable(role = Role.Button, onClick = onChooseFile),
                     color = MaterialTheme.colorScheme.primaryContainer,
                     shape = MaterialTheme.shapes.large,
                 ) {
                     Row(
-                        modifier = Modifier.padding(20.dp),
+                        modifier = Modifier.padding(18.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(
@@ -224,14 +232,19 @@ private fun EbookHomeScreen(
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         )
                         Spacer(Modifier.width(14.dp))
-                        Column {
-                            Text("打开 EPUB 或 TXT", style = MaterialTheme.typography.titleLarge)
+                        Column(Modifier.weight(1f)) {
+                            Text("选择本地电子书", style = MaterialTheme.typography.titleLarge)
                             Text(
-                                "支持本地文件、系统文件提供商和 HTTPS 地址",
+                                "EPUB 或 TXT",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                             )
                         }
+                        Icon(
+                            TablerIcons.ChevronRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
                     }
                 }
             }
@@ -251,33 +264,25 @@ private fun EbookHomeScreen(
                 }
             }
             item {
-                Button(onClick = onChooseFile, modifier = Modifier.fillMaxWidth()) {
-                    Icon(TablerIcons.FileText, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("选择本地电子书")
-                }
-            }
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = onlineUrl,
-                        onValueChange = { onlineUrl = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("HTTPS 在线地址") },
-                        placeholder = { Text("https://example.com/book.epub") },
-                        leadingIcon = { Icon(TablerIcons.CloudDownload, contentDescription = null) },
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                        keyboardActions = KeyboardActions(onGo = { onOpenOnline(onlineUrl) }),
-                    )
-                    OutlinedButton(
-                        onClick = { onOpenOnline(onlineUrl) },
-                        enabled = onlineUrl.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("打开在线电子书")
-                    }
-                }
+                OutlinedTextField(
+                    value = onlineUrl,
+                    onValueChange = { onlineUrl = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("在线电子书地址") },
+                    placeholder = { Text("https://example.com/book.epub") },
+                    leadingIcon = { Icon(TablerIcons.CloudDownload, contentDescription = null) },
+                    trailingIcon = {
+                        IconButton(
+                            onClick = { onOpenOnline(onlineUrl) },
+                            enabled = onlineUrl.isNotBlank(),
+                        ) {
+                            Icon(TablerIcons.ChevronRight, contentDescription = "打开在线电子书")
+                        }
+                    },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                    keyboardActions = KeyboardActions(onGo = { onOpenOnline(onlineUrl) }),
+                )
             }
             if (history.isNotEmpty()) {
                 item {
@@ -309,7 +314,10 @@ private fun EbookHistoryRow(entry: EbookHistoryEntry, onClick: () -> Unit) {
     }
 }
 
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@OptIn(
+    ExperimentalFoundationApi::class,
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+)
 @Composable
 private fun TxtReaderScreen(
     document: TxtEbookDocument,
@@ -442,26 +450,29 @@ private fun TxtReaderScreen(
                 }
             },
         ) { innerPadding ->
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize().padding(innerPadding),
-                contentPadding = PaddingValues(
-                    horizontal = viewModel.settings.horizontalPaddingDp.dp,
-                    vertical = 22.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                itemsIndexed(document.paragraphs, key = { index, _ -> index }) { _, paragraph ->
-                    SelectionContainer {
-                        Text(
-                            text = paragraph,
-                            style = TextStyle(
-                                fontSize = viewModel.settings.fontSizeSp.sp,
-                                lineHeight = (viewModel.settings.fontSizeSp * viewModel.settings.lineHeight).sp,
-                                color = readerForeground,
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+            // long: Android 12+ 默认拉伸滚动边界；阅读正文到底后应保持稳定，但仍保留正常滚动和惯性。
+            CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize().padding(innerPadding),
+                    contentPadding = PaddingValues(
+                        horizontal = viewModel.settings.horizontalPaddingDp.dp,
+                        vertical = 22.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    itemsIndexed(document.paragraphs, key = { index, _ -> index }) { _, paragraph ->
+                        SelectionContainer {
+                            Text(
+                                text = paragraph,
+                                style = TextStyle(
+                                    fontSize = viewModel.settings.fontSizeSp.sp,
+                                    lineHeight = (viewModel.settings.fontSizeSp * viewModel.settings.lineHeight).sp,
+                                    color = readerForeground,
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                     }
                 }
             }
@@ -594,6 +605,12 @@ private fun EpubReaderScreen(
     LaunchedEffect(navigator, viewModel.settings, systemDark) {
         navigator?.submitPreferences(viewModel.settings.toReadiumPreferences(systemDark))
     }
+    LaunchedEffect(navigator, currentLocator) {
+        navigator?.view?.let { root ->
+            root.disableReaderOverscroll()
+            root.post { root.disableReaderOverscroll() }
+        }
+    }
 
     ReaderSurface(viewModel.settings) {
         val readerBackground = readerBackgroundColor(viewModel.settings)
@@ -717,6 +734,7 @@ private fun EpubReaderScreen(
                             post { containerReady = true }
                         }
                     },
+                    update = { it.disableReaderOverscroll() },
                     modifier = Modifier.fillMaxSize(),
                 )
                 when {
@@ -1011,7 +1029,7 @@ private fun EbookSettingsSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("阅读设置", style = MaterialTheme.typography.titleLarge)
-            Text("字号 ${settings.fontSizeSp.toInt()}sp", style = MaterialTheme.typography.titleMedium)
+            Text("字号 ${settings.fontSizeSp.toInt()}sp", style = MaterialTheme.typography.labelLarge)
             Slider(
                 value = settings.fontSizeSp,
                 onValueChange = { onSettingsChange(settings.copy(fontSizeSp = it)) },
@@ -1022,7 +1040,7 @@ private fun EbookSettingsSheet(
                     stateDescription = "${settings.fontSizeSp.roundToInt()}sp"
                 },
             )
-            Text("行距 ${"%.2f".format(settings.lineHeight)}", style = MaterialTheme.typography.titleMedium)
+            Text("行距 ${"%.2f".format(settings.lineHeight)}", style = MaterialTheme.typography.labelLarge)
             Slider(
                 value = settings.lineHeight,
                 onValueChange = { onSettingsChange(settings.copy(lineHeight = it)) },
@@ -1033,7 +1051,7 @@ private fun EbookSettingsSheet(
                     stateDescription = "${"%.2f".format(settings.lineHeight)} 倍"
                 },
             )
-            Text("页边距 ${settings.horizontalPaddingDp.toInt()}dp", style = MaterialTheme.typography.titleMedium)
+            Text("页边距 ${settings.horizontalPaddingDp.toInt()}dp", style = MaterialTheme.typography.labelLarge)
             Slider(
                 value = settings.horizontalPaddingDp,
                 onValueChange = { onSettingsChange(settings.copy(horizontalPaddingDp = it)) },
@@ -1044,7 +1062,7 @@ private fun EbookSettingsSheet(
                     stateDescription = "${settings.horizontalPaddingDp.roundToInt()}dp"
                 },
             )
-            Text("阅读主题", style = MaterialTheme.typography.titleMedium)
+            Text("阅读主题", style = MaterialTheme.typography.labelLarge)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 EbookPageTheme.values().toList().chunked(2).forEach { rowThemes ->
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1201,6 +1219,16 @@ private fun currentEpubTocEntry(entries: List<EpubTocEntry>, locator: Locator?):
     }
     return progressionMatch ?: entries.lastOrNull {
         it.locator.href.substringBefore('#') == locator.href.substringBefore('#')
+    }
+}
+
+private fun View.disableReaderOverscroll() {
+    // long: Readium 会按章节动态挂载 WebView 和 ViewPager，逐层关闭边界效果才能覆盖当前及新建页面。
+    overScrollMode = View.OVER_SCROLL_NEVER
+    if (this is ViewGroup) {
+        for (index in 0 until childCount) {
+            getChildAt(index).disableReaderOverscroll()
+        }
     }
 }
 

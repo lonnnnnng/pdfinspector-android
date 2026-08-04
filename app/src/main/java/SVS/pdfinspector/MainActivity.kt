@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -69,6 +70,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -76,7 +79,6 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -333,7 +335,7 @@ fun InspectorScreen(
     if (showExitConfirmation) {
         AlertDialog(
             onDismissRequest = { showExitConfirmation = false },
-            title = { Text("退出 PDF 检查器？") },
+            title = { Text("退出阅读？") },
             text = { Text("确定要退出应用吗？") },
             dismissButton = {
                 TextButton(onClick = { showExitConfirmation = false }) {
@@ -627,8 +629,6 @@ private fun HomeScreen(
     Column(Modifier.fillMaxSize()) {
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 1.dp,
-            shadowElevation = 1.dp,
         ) {
             Row(
                 modifier = Modifier
@@ -639,7 +639,7 @@ private fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "PDF 检查器",
+                    stringResource(R.string.app_name),
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f),
                 )
@@ -659,43 +659,25 @@ private fun HomeScreen(
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .widthIn(max = 720.dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
                         horizontal = 20.dp,
-                        vertical = 24.dp,
+                        vertical = 20.dp,
                     ),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     item {
-                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            Column(
-                                modifier = Modifier.widthIn(max = 680.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                Surface(
-                                    modifier = Modifier.size(76.dp),
-                                    shape = MaterialTheme.shapes.extraLarge,
-                                    color = MaterialTheme.colorScheme.primaryContainer,
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = TablerIcons.FileText,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(38.dp),
-                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        )
-                                    }
-                                }
-                                Spacer(Modifier.height(18.dp))
-                                Text("选择使用方式", style = MaterialTheme.typography.headlineSmall)
-                                Spacer(Modifier.height(6.dp))
-                                Text(
-                                    "同一个 PDF 可以进入内容编辑工作区，也可以作为阅读器连续浏览。",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center,
-                                )
-                            }
+                        Column {
+                            Text("打开文档", style = MaterialTheme.typography.headlineSmall)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "继续阅读，或从设备中选择文件",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                     if (error != null) {
@@ -714,34 +696,39 @@ private fun HomeScreen(
                         }
                     }
                     item {
-                        ModeCard(
-                            icon = { Icon(TablerIcons.Edit, contentDescription = null) },
-                            title = "进入编辑模式",
-                            description = "检查并修改 PDF 中的文本、路径、图像和颜色。",
-                            onClick = onOpenEdit,
-                        )
-                    }
-                    item {
-                        ModeCard(
+                        PrimaryModeCard(
                             icon = { Icon(TablerIcons.Book, contentDescription = null) },
-                            title = "进入阅读模式",
-                            description = "连续滚动、搜索、目录、书签、缩略图和文本复制。",
+                            title = "阅读 PDF",
+                            description = "连续浏览、搜索、目录与书签",
                             onClick = onOpenRead,
                         )
                     }
                     item {
-                        ModeCard(
-                            icon = { Icon(TablerIcons.FileText, contentDescription = null) },
-                            title = "进入电子书阅读",
-                            description = "阅读 EPUB、TXT，支持本地文件和在线地址。",
-                            onClick = onOpenEbook,
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            CompactModeCard(
+                                icon = { Icon(TablerIcons.Edit, contentDescription = null) },
+                                title = "编辑 PDF",
+                                detail = "编辑文档内容",
+                                onClick = onOpenEdit,
+                                modifier = Modifier.weight(1f),
+                            )
+                            CompactModeCard(
+                                icon = { Icon(TablerIcons.FileText, contentDescription = null) },
+                                title = "电子书",
+                                detail = "EPUB · TXT",
+                                onClick = onOpenEbook,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
                     if (history.isNotEmpty()) {
                         item {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(top = 12.dp),
+                                modifier = Modifier.padding(top = 8.dp),
                             ) {
                                 Icon(
                                     TablerIcons.History,
@@ -764,7 +751,7 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun ModeCard(
+private fun PrimaryModeCard(
     icon: @Composable () -> Unit,
     title: String,
     description: String,
@@ -773,21 +760,21 @@ private fun ModeCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .heightIn(min = 112.dp)
+            .clickable(role = Role.Button, onClick = onClick),
         shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        tonalElevation = 1.dp,
-        shadowElevation = 1.dp,
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Surface(
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier.size(52.dp),
                 shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.14f),
+                contentColor = MaterialTheme.colorScheme.onPrimary,
             ) {
                 Box(contentAlignment = Alignment.Center) { icon() }
             }
@@ -798,10 +785,48 @@ private fun ModeCard(
                 Text(
                     description,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f),
                 )
             }
-            Icon(TablerIcons.ChevronRight, contentDescription = "打开", modifier = Modifier.size(20.dp))
+            Icon(TablerIcons.ChevronRight, contentDescription = null, modifier = Modifier.size(22.dp))
+        }
+    }
+}
+
+@Composable
+private fun CompactModeCard(
+    icon: @Composable () -> Unit,
+    title: String,
+    detail: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .heightIn(min = 120.dp)
+            .clickable(role = Role.Button, onClick = onClick),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Surface(
+                modifier = Modifier.size(40.dp),
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ) {
+                Box(contentAlignment = Alignment.Center) { icon() }
+            }
+            Spacer(Modifier.height(16.dp))
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -809,7 +834,10 @@ private fun ModeCard(
 @Composable
 private fun HistoryItem(entry: ReaderHistoryEntry, onClick: () -> Unit) {
     Surface(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .clickable(role = Role.Button, onClick = onClick),
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerLowest,
     ) {

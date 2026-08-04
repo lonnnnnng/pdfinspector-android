@@ -12,7 +12,7 @@ import androidx.compose.ui.platform.LocalContext
 enum class ThemeMode(val label: String) { SYSTEM("跟随系统"), LIGHT("浅色"), DARK("深色") }
 
 enum class Accent(val label: String) {
-    TEAL("青色"),
+    TEAL("墨绿色"),
     BLUE("蓝色"),
     VIOLET("紫色"),
     GREEN("绿色"),
@@ -66,7 +66,8 @@ fun rememberThemeState(): ThemeState {
         val accent = runCatching {
             Accent.valueOf(prefs.getString(ThemeState.KEY_ACCENT, Accent.TEAL.name)!!)
         }.getOrDefault(Accent.TEAL)
-        val dynamic = prefs.getBoolean(ThemeState.KEY_DYNAMIC, true)
+        // long: 首次启动先展示应用品牌色；用户仍可在设置中主动启用系统动态配色。
+        val dynamic = prefs.getBoolean(ThemeState.KEY_DYNAMIC, false)
         ThemeState(mode, dynamic, accent, prefs)
     }
 }

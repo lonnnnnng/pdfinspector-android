@@ -251,14 +251,14 @@ internal fun OnlineUpdateSection() {
             )
             is OnlineUpdateUiState.PermissionRequired -> UpdateInstallDetails(
                 title = "需要允许安装未知来源应用",
-                description = "请允许 PDF 检查器安装已下载的更新，然后返回继续。",
+                description = "请允许阅读安装已下载的更新，然后返回继续。",
                 buttonText = "授权并继续安装",
                 onClick = { activeDownload?.let(requestInstall) },
             )
             is OnlineUpdateUiState.CheckingInstallPermission -> UpdateProgressDetails(
                 title = "正在检查安装权限",
                 progressPercent = null,
-                detail = "正在确认系统是否允许 PDF 检查器安装更新",
+                detail = "正在确认系统是否允许阅读安装更新",
             )
             is OnlineUpdateUiState.Installing -> UpdateProgressDetails(
                 title = "正在准备安装 ${current.tagName}",

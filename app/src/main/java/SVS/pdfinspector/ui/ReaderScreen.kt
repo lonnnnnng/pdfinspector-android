@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -72,6 +73,9 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -244,12 +248,14 @@ fun ReaderScreen(
                 ReaderBottomAction(
                     icon = { Icon(TablerIcons.GridDots, contentDescription = null) },
                     label = "缩略图",
+                    selected = panel == ReaderPanel.THUMBNAILS,
                     onClick = { panel = ReaderPanel.THUMBNAILS },
                     modifier = Modifier.weight(1f),
                 )
                 ReaderBottomAction(
                     icon = { Icon(TablerIcons.Bookmarks, contentDescription = null) },
                     label = "目录/书签",
+                    selected = panel == ReaderPanel.OUTLINE,
                     onClick = { panel = ReaderPanel.OUTLINE },
                     modifier = Modifier.weight(1f),
                 )
@@ -262,6 +268,7 @@ fun ReaderScreen(
                 ReaderBottomAction(
                     icon = { Icon(TablerIcons.Copy, contentDescription = null) },
                     label = "选择文本",
+                    selected = panel == ReaderPanel.TEXT,
                     onClick = { panel = ReaderPanel.TEXT },
                     modifier = Modifier.weight(1f),
                 )
@@ -273,8 +280,8 @@ fun ReaderScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(readerState.pageInfos, key = { it.pageIndex }) { info ->
                 ReaderPage(
@@ -354,16 +361,35 @@ fun ReaderScreen(
 private fun ReaderBottomAction(
     icon: @Composable () -> Unit,
     label: String,
+    selected: Boolean = false,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier.clickable(onClick = onClick).padding(vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+    Surface(
+        modifier = modifier
+            .heightIn(min = 56.dp)
+            .semantics { this.selected = selected }
+            .clickable(role = Role.Button, onClick = onClick),
+        shape = MaterialTheme.shapes.small,
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        contentColor = if (selected) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
     ) {
-        icon()
-        Text(label, style = MaterialTheme.typography.labelSmall)
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            icon()
+            Text(label, style = MaterialTheme.typography.labelSmall)
+        }
     }
 }
 
@@ -387,8 +413,8 @@ private fun ReaderPage(
                     .aspectRatio(info.widthPoints / info.heightPoints)
                     .clickable(onClick = onZoom),
                 shape = MaterialTheme.shapes.small,
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 2.dp,
+                color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     when {

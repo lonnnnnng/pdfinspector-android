@@ -61,7 +61,7 @@ class OnlineUpdateManager(context: Context) {
         val fileName = updateApkFileName(downloadUrl, release.tagName)
         val relativePath = "updates/${System.currentTimeMillis()}-$fileName"
         val request = DownloadManager.Request(Uri.parse(downloadUrl))
-            .setTitle("PDF 检查器 ${release.tagName}")
+            .setTitle("阅读 ${release.tagName}")
             .setDescription("正在下载应用更新")
             .setMimeType(APK_MIME_TYPE)
             .setAllowedOverMetered(true)
@@ -131,7 +131,7 @@ class OnlineUpdateManager(context: Context) {
             return UpdateInstallResult.Failed("APK 尚未下载完成")
         }
         if (!canRequestPackageInstalls()) {
-            return UpdateInstallResult.Failed("请先允许 PDF 检查器安装未知来源应用")
+            return UpdateInstallResult.Failed("请先允许阅读安装未知来源应用")
         }
 
         val apkUri = downloadManager.getUriForDownloadedFile(pending.downloadId)
