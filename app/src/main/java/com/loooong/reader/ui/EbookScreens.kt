@@ -2,6 +2,7 @@ package com.loooong.reader.ui
 
 import android.os.Bundle
 import android.util.Log
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -27,6 +28,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -44,6 +46,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -70,6 +73,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -82,28 +86,37 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.commitNow
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import compose.icons.TablerIcons
+import compose.icons.tablericons.Book
 import compose.icons.tablericons.Bookmarks
 import compose.icons.tablericons.ChevronLeft
 import compose.icons.tablericons.ChevronRight
 import compose.icons.tablericons.CloudDownload
 import compose.icons.tablericons.FileText
+import compose.icons.tablericons.Maximize
 import compose.icons.tablericons.Search
 import compose.icons.tablericons.Settings
 import compose.icons.tablericons.Trash
+import compose.icons.tablericons.X
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import org.readium.r2.navigator.R2BasicWebView
 import org.readium.r2.navigator.ExperimentalDecorator
+import org.readium.r2.navigator.pager.R2ViewPager
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.epub.EpubPreferences
 import org.readium.r2.navigator.preferences.Color as ReadiumColor
@@ -121,6 +134,7 @@ import com.loooong.reader.EbookScreen
 import com.loooong.reader.EpubTocEntry
 import com.loooong.reader.EbookViewModel
 import com.loooong.reader.TxtEbookDocument
+import com.loooong.reader.normalizeHttpsEbookUrl
 import com.loooong.reader.txtTableOfContents
 
 @Composable
@@ -131,6 +145,8 @@ fun EbookApp(
     restoreHistory: Boolean,
     onChooseFile: () -> Unit,
 ) {
+    var fullscreen by rememberSaveable { mutableStateOf(false) }
+
     LaunchedEffect(initialUri, restoreHistory) {
         if (initialUri != null && viewModel.screen is EbookScreen.Library) {
             viewModel.openUri(activity, initialUri)
@@ -139,11 +155,33 @@ fun EbookApp(
         }
     }
 
+    LaunchedEffect(fullscreen) {
+        val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+        if (fullscreen) {
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+                .show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
     BackHandler {
-        when (viewModel.screen) {
-            EbookScreen.Library, is EbookScreen.Error -> activity.finish()
-            is EbookScreen.Loading -> viewModel.showLibrary()
-            is EbookScreen.Txt, is EbookScreen.Epub -> viewModel.showLibrary()
+        if (fullscreen) {
+            fullscreen = false
+        } else {
+            when (viewModel.screen) {
+                EbookScreen.Library, is EbookScreen.Error -> activity.finish()
+                is EbookScreen.Loading -> viewModel.showLibrary()
+                is EbookScreen.Txt, is EbookScreen.Epub -> viewModel.showLibrary()
+            }
         }
     }
 
@@ -169,12 +207,16 @@ fun EbookApp(
         is EbookScreen.Txt -> TxtReaderScreen(
             document = screen.document,
             viewModel = viewModel,
-            onBack = viewModel::showLibrary,
+            fullscreen = fullscreen,
+            onToggleFullscreen = { fullscreen = !fullscreen },
+            onBack = { fullscreen = false; viewModel.showLibrary() },
         )
         is EbookScreen.Epub -> EpubReaderScreen(
             document = screen.document,
             viewModel = viewModel,
-            onBack = viewModel::showLibrary,
+            fullscreen = fullscreen,
+            onToggleFullscreen = { fullscreen = !fullscreen },
+            onBack = { fullscreen = false; viewModel.showLibrary() },
         )
     }
 }
@@ -202,7 +244,19 @@ private fun EbookHomeScreen(
     onBack: () -> Unit,
 ) {
     var onlineUrl by remember { mutableStateOf("") }
+    var showOnlineUrlError by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<EbookHistoryEntry?>(null) }
+    val normalizedOnlineUrl = remember(onlineUrl) { normalizeHttpsEbookUrl(onlineUrl) }
+
+    fun submitOnlineUrl() {
+        val normalized = normalizedOnlineUrl
+        if (normalized == null) {
+            showOnlineUrlError = true
+        } else {
+            showOnlineUrlError = false
+            onOpenOnline(normalized)
+        }
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -218,93 +272,129 @@ private fun EbookHomeScreen(
             )
         },
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(innerPadding),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            item {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 96.dp)
-                        .clickable(role = Role.Button, onClick = onChooseFile),
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = MaterialTheme.shapes.large,
-                ) {
-                    Row(
-                        modifier = Modifier.padding(18.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            TablerIcons.FileText,
-                            contentDescription = null,
-                            modifier = Modifier.size(34.dp),
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("选择本地电子书", style = MaterialTheme.typography.titleLarge)
-                            Text(
-                                "EPUB 或 TXT",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
-                        }
-                        Icon(
-                            TablerIcons.ChevronRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
-                    }
-                }
-            }
-            if (error != null) {
+        Box(Modifier.fillMaxSize().padding(innerPadding)) {
+            LazyColumn(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .widthIn(max = 720.dp)
+                    .fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
                 item {
                     Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 96.dp)
+                            .clickable(role = Role.Button, onClick = onChooseFile),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = MaterialTheme.shapes.large,
                     ) {
-                        Text(
-                            error,
-                            modifier = Modifier.padding(16.dp),
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
+                        Row(
+                            modifier = Modifier.padding(18.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                TablerIcons.FileText,
+                                contentDescription = null,
+                                modifier = Modifier.size(34.dp),
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("选择本地电子书", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    "EPUB 或 TXT",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            }
+                            Icon(
+                                TablerIcons.ChevronRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                        }
                     }
                 }
-            }
-            item {
-                OutlinedTextField(
-                    value = onlineUrl,
-                    onValueChange = { onlineUrl = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text("在线电子书地址") },
-                    placeholder = { Text("https://example.com/book.epub") },
-                    leadingIcon = { Icon(TablerIcons.CloudDownload, contentDescription = null) },
-                    trailingIcon = {
-                        IconButton(
-                            onClick = { onOpenOnline(onlineUrl) },
-                            enabled = onlineUrl.isNotBlank(),
+                if (error != null) {
+                    item {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = MaterialTheme.shapes.medium,
                         ) {
-                            Icon(TablerIcons.ChevronRight, contentDescription = "打开在线电子书")
+                            Text(
+                                error,
+                                modifier = Modifier.padding(16.dp),
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                            )
                         }
-                    },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                    keyboardActions = KeyboardActions(onGo = { onOpenOnline(onlineUrl) }),
-                )
-            }
-            if (history.isNotEmpty()) {
+                    }
+                }
+                item {
+                    OutlinedTextField(
+                        value = onlineUrl,
+                        onValueChange = {
+                            onlineUrl = it
+                            if (it.isBlank()) showOnlineUrlError = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("在线电子书地址") },
+                        placeholder = { Text("https://example.com/book.epub") },
+                        supportingText = {
+                            Text(
+                                if (showOnlineUrlError && normalizedOnlineUrl == null) {
+                                    "请输入有效的 HTTPS 电子书直链"
+                                } else {
+                                    "支持 EPUB 和 TXT，不支持含账号信息的地址"
+                                },
+                            )
+                        },
+                        isError = showOnlineUrlError && normalizedOnlineUrl == null,
+                        leadingIcon = { Icon(TablerIcons.CloudDownload, contentDescription = null) },
+                        trailingIcon = {
+                            IconButton(
+                                onClick = ::submitOnlineUrl,
+                                enabled = onlineUrl.isNotBlank(),
+                            ) {
+                                Icon(TablerIcons.ChevronRight, contentDescription = "打开在线电子书")
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Uri,
+                            imeAction = ImeAction.Go,
+                        ),
+                        keyboardActions = KeyboardActions(onGo = { submitOnlineUrl() }),
+                    )
+                }
                 item {
                     Text("最近阅读", style = MaterialTheme.typography.titleMedium)
                 }
-                items(history, key = { it.sourceId }) { entry ->
-                    EbookHistoryRow(
-                        entry = entry,
-                        onClick = { onOpenHistory(entry) },
-                        onDelete = { pendingDelete = entry },
-                    )
+                if (history.isEmpty()) {
+                    item {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = MaterialTheme.shapes.medium,
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        ) {
+                            Text(
+                                "暂无电子书阅读记录",
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                } else {
+                    items(history, key = { it.sourceId }) { entry ->
+                        EbookHistoryRow(
+                            entry = entry,
+                            onClick = { onOpenHistory(entry) },
+                            onDelete = { pendingDelete = entry },
+                        )
+                    }
                 }
             }
         }
@@ -340,22 +430,45 @@ private fun EbookHistoryRow(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        onClick = onClick,
     ) {
-        ListItem(
-            leadingContent = { Icon(TablerIcons.Bookmarks, contentDescription = null) },
-            headlineContent = { Text(entry.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            supportingContent = {
-                val format = if (entry.format == EbookFormat.EPUB) "EPUB" else "TXT"
-                val progress = entry.progress?.let { " · ${(it * 100).roundToInt()}%" }.orEmpty()
-                Text("$format$progress")
-            },
-            trailingContent = {
-                IconButton(onClick = onDelete) {
-                    Icon(TablerIcons.Trash, contentDescription = "移除${entry.title}")
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(role = Role.Button, onClick = onClick)
+                    .padding(vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    if (entry.format == EbookFormat.EPUB) TablerIcons.Book else TablerIcons.FileText,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(entry.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val format = if (entry.format == EbookFormat.EPUB) "EPUB" else "TXT"
+                    val progress = entry.progress?.let { " · ${(it * 100).roundToInt()}%" }.orEmpty()
+                    Text(
+                        "$format$progress",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-            },
-        )
+            }
+            IconButton(onClick = onDelete) {
+                Icon(
+                    TablerIcons.Trash,
+                    contentDescription = "移除${entry.title}",
+                    tint = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
     }
 }
 
@@ -367,6 +480,8 @@ private fun EbookHistoryRow(
 private fun TxtReaderScreen(
     document: TxtEbookDocument,
     viewModel: EbookViewModel,
+    fullscreen: Boolean,
+    onToggleFullscreen: () -> Unit,
     onBack: () -> Unit,
 ) {
     val listState = rememberLazyListState(
@@ -420,7 +535,7 @@ private fun TxtReaderScreen(
             containerColor = readerBackground,
             contentColor = readerForeground,
             topBar = {
-                TopAppBar(
+                if (!fullscreen) TopAppBar(
                     title = {
                         Column {
                             Text(document.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -446,6 +561,12 @@ private fun TxtReaderScreen(
                         IconButton(onClick = { panel = TxtPanel.SETTINGS }) {
                             Icon(TablerIcons.Settings, contentDescription = "阅读设置")
                         }
+                        IconButton(onClick = onToggleFullscreen) {
+                            Icon(
+                                TablerIcons.Maximize,
+                                contentDescription = "进入全屏",
+                            )
+                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = readerBackground,
@@ -457,7 +578,7 @@ private fun TxtReaderScreen(
                 )
             },
             bottomBar = {
-                Column(Modifier.background(readerBackground).navigationBarsPadding()) {
+                if (!fullscreen) Column(Modifier.background(readerBackground).navigationBarsPadding()) {
                     ReaderProgressSlider(
                         progress = displayedProgress,
                         enabled = document.paragraphs.size > 1,
@@ -568,6 +689,8 @@ private enum class TxtPanel { SEARCH, TOC, SETTINGS }
 private fun EpubReaderScreen(
     document: EpubEbookDocument,
     viewModel: EbookViewModel,
+    fullscreen: Boolean,
+    onToggleFullscreen: () -> Unit,
     onBack: () -> Unit,
 ) {
     val activity = LocalContext.current as? FragmentActivity
@@ -581,6 +704,7 @@ private fun EpubReaderScreen(
     var pendingProgress by remember(document.sourceId) { mutableStateOf<Float?>(null) }
     var seeking by remember(document.sourceId) { mutableStateOf(false) }
     var containerReady by remember(document.sourceId) { mutableStateOf(false) }
+    var navigatorContentReady by remember(document.sourceId) { mutableStateOf(false) }
     var navigatorMountError by remember(document.sourceId) { mutableStateOf<String?>(null) }
     var mountAttempt by remember(document.sourceId) { mutableStateOf(0) }
     val systemDark = isSystemInDarkTheme()
@@ -620,6 +744,7 @@ private fun EpubReaderScreen(
                 Log.e(EPUB_READER_LOG_TAG, "Readium 正文挂载失败", mountError)
             }
             navigator = mountedNavigator
+            navigatorContentReady = false
             navigatorMountError = if (mountedNavigator == null) "正文加载失败，请重试" else null
             if (mountedNavigator == null) {
                 // long: Readium 挂载失败时保留阅读页和显式重试入口，避免用户只看到无法恢复的空白区域。
@@ -632,6 +757,7 @@ private fun EpubReaderScreen(
             onDispose {
                 latestLocator?.let { viewModel.saveEpubPosition(document, it) }
                 navigator = null
+                navigatorContentReady = false
                 runCatching {
                     fragmentManager.findFragmentByTag(EPUB_NAVIGATOR_TAG)?.let { fragment ->
                         fragmentManager.commitNow { remove(fragment) }
@@ -654,11 +780,19 @@ private fun EpubReaderScreen(
     LaunchedEffect(navigator, viewModel.settings, systemDark) {
         navigator?.submitPreferences(viewModel.settings.toReadiumPreferences(systemDark))
     }
-    LaunchedEffect(navigator, currentLocator) {
-        navigator?.view?.let { root ->
+    LaunchedEffect(navigator, currentLocator?.href) {
+        val activeNavigator = navigator ?: return@LaunchedEffect
+        activeNavigator.view?.let { root ->
             root.disableReaderOverscroll()
             root.post { root.disableReaderOverscroll() }
         }
+        // long: Readium 的页面 WebView 是异步加载的，延迟注入才能覆盖章节切换后新建的正文 DOM。
+        delay(100)
+        activeNavigator.view?.disableReaderOverscroll()
+        activeNavigator.awaitDocumentReady()
+        activeNavigator.disableUserPaging()
+        activeNavigator.lockHorizontalViewport()
+        if (navigator === activeNavigator) navigatorContentReady = true
     }
 
     ReaderSurface(viewModel.settings) {
@@ -669,7 +803,7 @@ private fun EpubReaderScreen(
             contentColor = readerForeground,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
-                TopAppBar(
+                if (!fullscreen) TopAppBar(
                     title = {
                         Column {
                             Text(document.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -697,6 +831,9 @@ private fun EpubReaderScreen(
                         IconButton(onClick = { panel = EpubPanel.SETTINGS }) {
                             Icon(TablerIcons.Settings, contentDescription = "阅读设置")
                         }
+                        IconButton(onClick = onToggleFullscreen) {
+                            Icon(TablerIcons.Maximize, contentDescription = "进入全屏")
+                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = readerBackground,
@@ -708,7 +845,7 @@ private fun EpubReaderScreen(
                 )
             },
             bottomBar = {
-                Column(Modifier.background(readerBackground).navigationBarsPadding()) {
+                if (!fullscreen) Column(Modifier.background(readerBackground).navigationBarsPadding()) {
                     ReaderProgressSlider(
                         progress = displayedProgress,
                         enabled = navigator != null && !seeking && locatorService != null,
@@ -806,7 +943,7 @@ private fun EpubReaderScreen(
                             Text("重新加载正文")
                         }
                     }
-                    navigator == null && !inspectionMode -> Column(
+                    (navigator == null || !navigatorContentReady) && !inspectionMode -> Column(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(readerBackground),
@@ -902,8 +1039,8 @@ private fun EbookSearchSheet(
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).navigationBarsPadding(),
         ) {
-            Text("搜索正文", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(12.dp))
+            EbookSheetHeader("搜索正文", onDismiss, horizontalPadding = 0.dp)
+            Spacer(Modifier.height(4.dp))
             OutlinedTextField(
                 value = query,
                 onValueChange = onQueryChange,
@@ -911,15 +1048,30 @@ private fun EbookSearchSheet(
                 singleLine = true,
                 label = { Text("输入关键词") },
                 leadingIcon = { Icon(TablerIcons.Search, contentDescription = null) },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { onQueryChange(query.trim()) }),
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
             when {
-                searching -> CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
-                error != null -> Text(error, color = MaterialTheme.colorScheme.error)
+                searching -> Box(
+                    modifier = Modifier.fillMaxWidth().height(160.dp),
+                    contentAlignment = Alignment.Center,
+                ) { CircularProgressIndicator() }
+                error != null -> Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    shape = MaterialTheme.shapes.small,
+                ) {
+                    Text(
+                        error,
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                }
+                query.isBlank() -> EbookSheetEmptyMessage("输入关键词后搜索正文")
                 txtResults.isEmpty() && epubResults.isEmpty() && query.isNotBlank() ->
-                    Text("没有找到匹配内容", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    EbookSheetEmptyMessage("没有找到匹配内容")
                 else -> LazyColumn(
-                    modifier = Modifier.fillMaxWidth().height(360.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 420.dp),
                 ) {
                     items(txtResults, key = { it.paragraphIndex }) { result ->
                         ListItem(
@@ -950,6 +1102,7 @@ private fun EbookSearchSheet(
                                 Icon(TablerIcons.ChevronRight, contentDescription = null)
                             },
                         )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                     }
                 }
             }
@@ -971,9 +1124,9 @@ private fun TxtTocSheet(
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = currentEntryIndex)
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
-            Text("目录", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 20.dp))
+            EbookSheetHeader("目录", onDismiss)
             if (entries.isEmpty()) {
-                Text("TXT 未提供章节目录", modifier = Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                EbookSheetEmptyMessage("TXT 未提供章节目录")
             } else {
                 LazyColumn(
                     state = listState,
@@ -994,12 +1147,20 @@ private fun TxtTocSheet(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .semantics { selected = isCurrent }
-                                .clickable { onSelect(index) },
+                                .clickable(role = Role.Tab) { onSelect(index) },
                             leadingContent = { Icon(TablerIcons.Bookmarks, contentDescription = null) },
                             trailingContent = {
                                 if (isCurrent) Text("当前", color = MaterialTheme.colorScheme.primary)
                             },
+                            colors = ListItemDefaults.colors(
+                                containerColor = if (isCurrent) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainerLow
+                                },
+                            ),
                         )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                     }
                 }
             }
@@ -1023,9 +1184,9 @@ private fun EpubTocSheet(
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = currentEntryIndex)
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
-            Text("目录", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 20.dp))
+            EbookSheetHeader("目录", onDismiss)
             if (entries.isEmpty()) {
-                Text("这本 EPUB 没有目录信息", modifier = Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                EbookSheetEmptyMessage("这本 EPUB 没有目录信息")
             } else {
                 LazyColumn(
                     state = listState,
@@ -1047,12 +1208,20 @@ private fun EpubTocSheet(
                                 .fillMaxWidth()
                                 .padding(start = (entry.depth * 18).dp)
                                 .semantics { selected = isCurrent }
-                                .clickable { onSelect(entry.locator) },
+                                .clickable(role = Role.Tab) { onSelect(entry.locator) },
                             leadingContent = { Icon(TablerIcons.Bookmarks, contentDescription = null) },
                             trailingContent = {
                                 if (isCurrent) Text("当前", color = MaterialTheme.colorScheme.primary)
                             },
+                            colors = ListItemDefaults.colors(
+                                containerColor = if (isCurrent) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainerLow
+                                },
+                            ),
                         )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                     }
                 }
             }
@@ -1077,7 +1246,7 @@ private fun EbookSettingsSheet(
                 .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("阅读设置", style = MaterialTheme.typography.titleLarge)
+            EbookSheetHeader("阅读设置", onDismiss, horizontalPadding = 0.dp)
             Text("字号 ${settings.fontSizeSp.toInt()}sp", style = MaterialTheme.typography.labelLarge)
             Slider(
                 value = settings.fontSizeSp,
@@ -1144,6 +1313,39 @@ private fun EbookSettingsSheet(
             }
             Spacer(Modifier.height(8.dp))
         }
+    }
+}
+
+@Composable
+private fun EbookSheetHeader(
+    title: String,
+    onDismiss: () -> Unit,
+    horizontalPadding: androidx.compose.ui.unit.Dp = 12.dp,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = horizontalPadding + 8.dp, end = horizontalPadding),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+        IconButton(onClick = onDismiss) {
+            Icon(TablerIcons.X, contentDescription = "关闭$title")
+        }
+    }
+}
+
+@Composable
+private fun EbookSheetEmptyMessage(message: String) {
+    Box(
+        modifier = Modifier.fillMaxWidth().height(160.dp).padding(20.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -1274,6 +1476,21 @@ private fun currentEpubTocEntry(entries: List<EpubTocEntry>, locator: Locator?):
 private fun View.disableReaderOverscroll() {
     // long: Readium 会按章节动态挂载 WebView 和 ViewPager，逐层关闭边界效果才能覆盖当前及新建页面。
     overScrollMode = View.OVER_SCROLL_NEVER
+    if (this is R2ViewPager) {
+        setOnTouchListener { _, _ ->
+            // long: 阅读页通过底部按钮翻章，直接消费 ViewPager 的触摸，防止横向拖动推进到下一资源。
+            true
+        }
+    }
+    if (this is R2BasicWebView) {
+        setOnTouchListener { view, event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                // long: 正文接管整次触摸序列，避免父级 ViewPager 在横向拖动中途截走事件并停在半页位置。
+                view.parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            false
+        }
+    }
     if (this is ViewGroup) {
         for (index in 0 until childCount) {
             getChildAt(index).disableReaderOverscroll()
@@ -1281,6 +1498,93 @@ private fun View.disableReaderOverscroll() {
     }
 }
 
+@OptIn(ExperimentalReadiumApi::class)
+private suspend fun EpubNavigatorFragment.awaitDocumentReady() {
+    // long: Navigator 对象创建早于正文 HTML 提交，轮询 readyState 期间继续显示遮罩，避免透明 WebView 暴露成白屏。
+    repeat(20) {
+        val readyState = try {
+            evaluateJavascript("document.readyState")
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Throwable) {
+            null
+        }
+        if (readyState?.contains("complete") == true) return
+        delay(50)
+    }
+}
+
+private fun EpubNavigatorFragment.disableUserPaging() {
+    // long: 直接处理 Readium 暴露的分页器实例，确保横向手势不会把正文切到下一资源。
+    runCatching { resourcePager }
+        .getOrNull()
+        ?.setOnTouchListener { _, _ -> true }
+}
+
+@OptIn(ExperimentalReadiumApi::class)
+private suspend fun EpubNavigatorFragment.lockHorizontalViewport() {
+    try {
+        evaluateJavascript(EPUB_HORIZONTAL_LOCK_SCRIPT)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Throwable) {
+        Log.e(EPUB_READER_LOG_TAG, "锁定 EPUB 横向滚动失败", error)
+    }
+}
+
 private const val EPUB_NAVIGATOR_TAG = "ebook_epub_navigator"
 private const val EPUB_READER_LOG_TAG = "EbookReader"
 private const val POSITION_SAVE_DEBOUNCE_MS = 700L
+
+private const val EPUB_HORIZONTAL_LOCK_SCRIPT = """
+    (() => {
+        const root = document.scrollingElement;
+        if (!root) return;
+
+        // long: 横向拖动只应触发系统手势，正文滚动容器必须始终从左侧起排版。
+        document.documentElement.style.setProperty("overflow-x", "hidden", "important");
+        document.documentElement.style.setProperty("overscroll-behavior-x", "none", "important");
+        document.documentElement.style.touchAction = "pan-y pinch-zoom";
+        if (document.body) {
+            document.body.style.setProperty("overflow-x", "hidden", "important");
+            document.body.style.setProperty("overscroll-behavior-x", "none", "important");
+            document.body.style.touchAction = "pan-y pinch-zoom";
+        }
+
+        // long: 出版物常把封面和插图写成固定像素尺寸，先缩放到设备视口内，避免用户靠横向拖动才能看全图。
+        const imageStyleId = "__readerImageFit";
+        if (!document.getElementById(imageStyleId)) {
+            const imageStyle = document.createElement("style");
+            imageStyle.id = imageStyleId;
+            imageStyle.textContent = `
+                .custom-cover, .readerChapterContent .frontCover {
+                    width: 100% !important;
+                    max-width: 100% !important;
+                    box-sizing: border-box !important;
+                    margin-left: 0 !important;
+                    margin-right: 0 !important;
+                }
+                .custom-cover img, .readerChapterContent .frontCover img,
+                .readerChapterContent img[data-w], .readerChapterContent img.qqreader-fullimg {
+                    display: block !important;
+                    max-width: 100% !important;
+                    width: auto !important;
+                    height: auto !important;
+                    margin-left: auto !important;
+                    margin-right: auto !important;
+                    object-fit: contain !important;
+                }
+            `;
+            (document.head || document.documentElement).appendChild(imageStyle);
+        }
+
+        const resetHorizontalOffset = () => {
+            if (root.scrollLeft !== 0) root.scrollLeft = 0;
+        };
+
+        resetHorizontalOffset();
+        window.removeEventListener("scroll", window.__readerHorizontalReset);
+        window.__readerHorizontalReset = resetHorizontalOffset;
+        window.addEventListener("scroll", resetHorizontalOffset, { passive: true });
+    })();
+"""

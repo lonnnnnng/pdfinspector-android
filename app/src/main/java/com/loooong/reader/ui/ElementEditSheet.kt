@@ -4,11 +4,16 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
@@ -58,6 +63,14 @@ fun ElementEditSheet(
     var text by remember(id) { mutableStateOf(target.text ?: "") }
     var useFallback by remember(id) { mutableStateOf(true) }
     var fontId by remember(id) { mutableStateOf<String?>(AUTO_FONT_ID) }
+    val xInvalid = caps.canGeom && parseFiniteFloat(x) == null
+    val yInvalid = caps.canGeom && parseFiniteFloat(y) == null
+    val widthInvalid = caps.canGeom && parsePositiveFloat(w) == null
+    val heightInvalid = caps.canGeom && parsePositiveFloat(h) == null
+    val fillInvalid = caps.canFill && fill.isNotBlank() && parseHex(fill) == null
+    val strokeInvalid = caps.canStroke && stroke.isNotBlank() && parseHex(stroke) == null
+    val formValid = !xInvalid && !yInvalid && !widthInvalid && !heightInvalid &&
+        !fillInvalid && !strokeInvalid
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent(),
@@ -69,6 +82,9 @@ fun ElementEditSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
+                .verticalScroll(rememberScrollState())
+                .imePadding()
+                .navigationBarsPadding()
                 .padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -90,20 +106,34 @@ fun ElementEditSheet(
             if (caps.canGeom) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("位置", style = MaterialTheme.typography.labelLarge)
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        NumberField("X", x, { x = it }, Modifier.weight(1f))
-                        NumberField("Y", y, { y = it }, Modifier.weight(1f))
-                    }
+                    AdaptiveNumberPair(
+                        firstLabel = "X",
+                        firstValue = x,
+                        firstInvalid = xInvalid,
+                        onFirstChange = { x = it },
+                        secondLabel = "Y",
+                        secondValue = y,
+                        secondInvalid = yInvalid,
+                        onSecondChange = { y = it },
+                        errorMessage = "请输入有效数字",
+                    )
                     Text(
                         "单位为 PDF 点，原点位于左下角",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text("尺寸", style = MaterialTheme.typography.labelLarge)
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        NumberField("宽", w, { w = it }, Modifier.weight(1f))
-                        NumberField("高", h, { h = it }, Modifier.weight(1f))
-                    }
+                    AdaptiveNumberPair(
+                        firstLabel = "宽",
+                        firstValue = w,
+                        firstInvalid = widthInvalid,
+                        onFirstChange = { w = it },
+                        secondLabel = "高",
+                        secondValue = h,
+                        secondInvalid = heightInvalid,
+                        onSecondChange = { h = it },
+                        errorMessage = "请输入大于 0 的数字",
+                    )
                 }
             }
 
@@ -113,6 +143,12 @@ fun ElementEditSheet(
                     onValueChange = { fill = it },
                     label = { Text("填充颜色  #RRGGBB") },
                     singleLine = true,
+                    isError = fillInvalid,
+                    supportingText = if (fillInvalid) {
+                        { Text("请输入 #RRGGBB 格式的颜色") }
+                    } else {
+                        null
+                    },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -123,6 +159,12 @@ fun ElementEditSheet(
                     onValueChange = { stroke = it },
                     label = { Text("描边颜色  #RRGGBB") },
                     singleLine = true,
+                    isError = strokeInvalid,
+                    supportingText = if (strokeInvalid) {
+                        { Text("请输入 #RRGGBB 格式的颜色") }
+                    } else {
+                        null
+                    },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -142,6 +184,8 @@ fun ElementEditSheet(
                     value = text,
                     onValueChange = { text = it },
                     label = { Text("文本") },
+                    minLines = 2,
+                    maxLines = 5,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -178,14 +222,59 @@ fun ElementEditSheet(
                 horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
             ) {
                 TextButton(onClick = onDismiss) { Text("取消") }
-                Button(onClick = {
-                    onApply(
-                        buildRequest(
-                            target, x, y, w, h, fill, stroke, text,
-                            if (useFallback) fontId ?: AUTO_FONT_ID else null,
-                        ),
-                    )
-                }) { Text("应用") }
+                Button(
+                    enabled = formValid,
+                    onClick = {
+                        onApply(
+                            buildRequest(
+                                target, x, y, w, h, fill, stroke, text,
+                                if (useFallback) fontId ?: AUTO_FONT_ID else null,
+                            ),
+                        )
+                    },
+                ) { Text("应用") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdaptiveNumberPair(
+    firstLabel: String,
+    firstValue: String,
+    firstInvalid: Boolean,
+    onFirstChange: (String) -> Unit,
+    secondLabel: String,
+    secondValue: String,
+    secondInvalid: Boolean,
+    onSecondChange: (String) -> Unit,
+    errorMessage: String,
+) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        // long: 分屏和手机横屏可用宽度不足时改为单列，避免字段标签与错误文案互相挤压。
+        if (maxWidth < 300.dp) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                NumberField(firstLabel, firstValue, onFirstChange, firstInvalid, errorMessage)
+                NumberField(secondLabel, secondValue, onSecondChange, secondInvalid, errorMessage)
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                NumberField(
+                    firstLabel,
+                    firstValue,
+                    onFirstChange,
+                    firstInvalid,
+                    errorMessage,
+                    Modifier.weight(1f),
+                )
+                NumberField(
+                    secondLabel,
+                    secondValue,
+                    onSecondChange,
+                    secondInvalid,
+                    errorMessage,
+                    Modifier.weight(1f),
+                )
             }
         }
     }
@@ -196,6 +285,8 @@ private fun NumberField(
     label: String,
     value: String,
     onValueChange: (String) -> Unit,
+    isError: Boolean,
+    errorMessage: String,
     modifier: Modifier = Modifier,
 ) {
     OutlinedTextField(
@@ -203,7 +294,9 @@ private fun NumberField(
         onValueChange = onValueChange,
         label = { Text(label) },
         singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        isError = isError,
+        supportingText = if (isError) ({ Text(errorMessage) }) else null,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
         modifier = modifier,
     )
 }
@@ -314,3 +407,9 @@ private fun parseHex(s: String): Int? {
     val v = t.toIntOrNull(16) ?: return null
     return (0xFF shl 24) or v
 }
+
+private fun parseFiniteFloat(value: String): Float? =
+    value.toFloatOrNull()?.takeIf { it.isFinite() }
+
+private fun parsePositiveFloat(value: String): Float? =
+    parseFiniteFloat(value)?.takeIf { it > 0f }

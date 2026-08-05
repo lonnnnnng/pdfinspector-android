@@ -3,17 +3,21 @@ package com.loooong.reader.ui
 import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -23,6 +27,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -39,8 +44,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import compose.icons.TablerIcons
 import compose.icons.tablericons.Check
@@ -77,88 +84,130 @@ fun SettingsScreen(theme: ThemeState, onBack: () -> Unit) {
             LazyColumn(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .widthIn(max = 720.dp),
+                    .widthIn(max = 720.dp)
+                    .fillMaxWidth(),
                 contentPadding = PaddingValues(bottom = 32.dp),
             ) {
-            item { SectionLabel("外观") }
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Text("主题", style = MaterialTheme.typography.bodyLarge)
-                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                        val modes = ThemeMode.entries
-                        modes.forEachIndexed { index, mode ->
-                            SegmentedButton(
-                                selected = theme.mode == mode,
-                                onClick = { theme.updateMode(mode) },
-                                shape = SegmentedButtonDefaults.itemShape(index, modes.size),
-                            ) { Text(mode.label) }
-                        }
-                    }
-                }
-            }
-
-            val dynamicAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-            if (dynamicAvailable) {
+                item { SectionLabel("外观") }
                 item {
-                    ListItem(
-                        headlineContent = { Text("动态配色") },
-                        supportingContent = { Text("跟随系统壁纸配色") },
-                        trailingContent = {
-                            Switch(
-                                checked = theme.dynamic,
-                                onCheckedChange = theme::updateDynamic,
-                            )
-                        },
-                    )
-                }
-            }
-
-            item {
-                val accentEnabled = !(theme.dynamic && dynamicAvailable)
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Text(
-                        "强调色",
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.alpha(if (accentEnabled) 1f else 0.5f),
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Accent.entries.forEach { accent ->
-                            Swatch(
-                                label = accent.label,
-                                color = Palettes.swatch(accent),
-                                selected = theme.accent == accent,
-                                enabled = accentEnabled,
-                                onClick = { theme.updateAccent(accent) },
-                            )
+                        Text("主题", style = MaterialTheme.typography.bodyLarge)
+                        BoxWithConstraints(Modifier.fillMaxWidth()) {
+                            val modes = ThemeMode.entries
+                            if (maxWidth < 360.dp) {
+                                Column {
+                                    modes.forEach { mode ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(min = 48.dp)
+                                                .selectable(
+                                                    selected = theme.mode == mode,
+                                                    role = Role.RadioButton,
+                                                    onClick = { theme.updateMode(mode) },
+                                                )
+                                                .padding(horizontal = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text(mode.label, modifier = Modifier.weight(1f))
+                                            RadioButton(
+                                                selected = theme.mode == mode,
+                                                onClick = null,
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                                    modes.forEachIndexed { index, mode ->
+                                        SegmentedButton(
+                                            selected = theme.mode == mode,
+                                            onClick = { theme.updateMode(mode) },
+                                            shape = SegmentedButtonDefaults.itemShape(index, modes.size),
+                                        ) {
+                                            Text(mode.label, maxLines = 1, softWrap = false)
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
-                    if (!accentEnabled) {
-                        Text(
-                            "关闭动态配色后可以选择强调色。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                }
+
+                val dynamicAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                if (dynamicAvailable) {
+                    item {
+                        ListItem(
+                            modifier = Modifier.toggleable(
+                                value = theme.dynamic,
+                                role = Role.Switch,
+                                onValueChange = theme::updateDynamic,
+                            ),
+                            headlineContent = { Text("动态配色") },
+                            supportingContent = { Text("跟随系统壁纸配色") },
+                            trailingContent = {
+                                Switch(
+                                    checked = theme.dynamic,
+                                    onCheckedChange = null,
+                                )
+                            },
                         )
                     }
                 }
-            }
 
-            item { HorizontalDivider(Modifier.padding(top = 8.dp)) }
-            item { SectionLabel("更新") }
-            item { OnlineUpdateSection() }
+                item {
+                    val accentEnabled = !(theme.dynamic && dynamicAvailable)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text(
+                            "强调色",
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.alpha(if (accentEnabled) 1f else 0.5f),
+                        )
+                        BoxWithConstraints(Modifier.fillMaxWidth()) {
+                            val accents = Accent.entries.toList()
+                            val columns = if (maxWidth >= 384.dp) accents.size else 3
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                accents.chunked(columns).forEach { rowAccents ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceEvenly,
+                                    ) {
+                                        rowAccents.forEach { accent ->
+                                            Swatch(
+                                                label = accent.label,
+                                                color = Palettes.swatch(accent),
+                                                selected = theme.accent == accent,
+                                                enabled = accentEnabled,
+                                                onClick = { theme.updateAccent(accent) },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (!accentEnabled) {
+                            Text(
+                                "关闭动态配色后可以选择强调色。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+
+                item { HorizontalDivider(Modifier.padding(top = 8.dp)) }
+                item { SectionLabel("更新") }
+                item { OnlineUpdateSection() }
             }
         }
     }
@@ -183,26 +232,44 @@ private fun Swatch(
     onClick: () -> Unit,
 ) {
     val ring = MaterialTheme.colorScheme.onSurface
-    Box(
+    Column(
         modifier = Modifier
-            .size(48.dp)
+            .width(72.dp)
             .alpha(if (enabled) 1f else 0.4f)
-            .clip(CircleShape)
-            .background(color)
-            .then(if (selected) Modifier.border(3.dp, ring, CircleShape) else Modifier)
             .semantics {
                 contentDescription = "$label 强调色"
-                this.selected = selected
             }
-            .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center,
+            .selectable(
+                selected = selected,
+                enabled = enabled,
+                role = Role.RadioButton,
+                onClick = onClick,
+            ),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        if (selected) {
-            Icon(
-                imageVector = TablerIcons.Check,
-                contentDescription = null,
-                tint = if (color.luminance() > 0.5f) Color.Black else Color.White,
-            )
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(color)
+                .then(if (selected) Modifier.border(3.dp, ring, CircleShape) else Modifier),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) {
+                Icon(
+                    imageVector = TablerIcons.Check,
+                    contentDescription = null,
+                    tint = if (color.luminance() > 0.5f) Color.Black else Color.White,
+                )
+            }
         }
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
     }
 }

@@ -1,0 +1,4 @@
+- polished PDF and ebook reading interactions
+- improved accessibility semantics for navigation and history
+- added safer element deletion confirmation
+- refined dark theme editing and online update actions

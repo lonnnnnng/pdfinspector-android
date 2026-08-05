@@ -16,6 +16,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -49,6 +50,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -65,6 +67,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -72,6 +75,12 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -145,6 +154,7 @@ fun InspectorScreen(
     val state = viewModel.state
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showExitConfirmation by rememberSaveable { mutableStateOf(false) }
+    var showDeleteConfirmation by rememberSaveable { mutableStateOf(false) }
     var pendingMode by rememberSaveable { mutableStateOf(AppMode.EDIT) }
 
     fun openEbookReader() {
@@ -170,29 +180,40 @@ fun InspectorScreen(
 
     val configuration = LocalConfiguration.current
     val landscape = configuration.screenWidthDp > configuration.screenHeightDp
-    var dock by remember(landscape) { mutableStateOf(if (landscape) Dock.SIDE else Dock.BOTTOM) }
+    val sideDockSupported = configuration.screenWidthDp >= 600
+    var dock by remember(landscape, sideDockSupported) {
+        mutableStateOf(if (landscape && sideDockSupported) Dock.SIDE else Dock.BOTTOM)
+    }
     var transparent by rememberSaveable { mutableStateOf(false) }
-    val maxBottomHeight = (configuration.screenHeightDp * 0.55f).dp.coerceAtLeast(180.dp)
-    val maxSideWidth = (configuration.screenWidthDp * 0.50f).dp.coerceAtLeast(260.dp)
-    var bottomHeight by remember(configuration.screenHeightDp) {
-        mutableStateOf((configuration.screenHeightDp * 0.34f).dp.coerceIn(180.dp, maxBottomHeight))
+    // long: 手机横屏改用更紧凑的底部面板范围，为画布和工具栏保留基本可操作高度。
+    val minBottomHeight = if (landscape) 96.dp else 180.dp
+    val maxBottomHeight = (
+        configuration.screenHeightDp * if (landscape) 0.45f else 0.55f
+    ).dp.coerceAtLeast(minBottomHeight)
+    val minSideWidth = 220.dp
+    val maxSideWidth = minOf(
+        (configuration.screenWidthDp * 0.50f).dp,
+        configuration.screenWidthDp.dp - 280.dp - 40.dp,
+    ).coerceAtLeast(minSideWidth)
+    var bottomHeight by remember(configuration.screenHeightDp, landscape) {
+        mutableStateOf((configuration.screenHeightDp * 0.34f).dp.coerceIn(minBottomHeight, maxBottomHeight))
     }
     var sideWidth by remember(configuration.screenWidthDp) {
-        mutableStateOf((configuration.screenWidthDp * 0.36f).dp.coerceIn(260.dp, maxSideWidth))
+        mutableStateOf((configuration.screenWidthDp * 0.36f).dp.coerceIn(minSideWidth, maxSideWidth))
     }
     val density = LocalDensity.current
     val sizeDp = if (dock == Dock.BOTTOM) bottomHeight else sideWidth
     val onResize: (Float) -> Unit = { delta ->
         if (dock == Dock.BOTTOM) {
             bottomHeight = with(density) { (bottomHeight.toPx() - delta).toDp() }
-                .coerceIn(180.dp, maxBottomHeight)
+                .coerceIn(minBottomHeight, maxBottomHeight)
         } else {
             sideWidth = with(density) { (sideWidth.toPx() - delta).toDp() }
-                .coerceIn(260.dp, maxSideWidth)
+                .coerceIn(minSideWidth, maxSideWidth)
         }
     }
 
-    var fullscreen by remember { mutableStateOf(false) }
+    var fullscreen by rememberSaveable { mutableStateOf(false) }
     var fitMode by remember { mutableStateOf(FitMode.WIDTH) }
     LaunchedEffect(state.documentToken) { fitMode = FitMode.WIDTH }
 
@@ -208,14 +229,27 @@ fun InspectorScreen(
         }
     }
 
+    DisposableEffect(Unit) {
+        onDispose {
+            // long: 宿主组合销毁时主动恢复系统栏，避免下次进入页面继承残留的沉浸状态。
+            (context as? Activity)?.window?.let { window ->
+                WindowCompat.getInsetsController(window, view)
+                    .show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
+
     BackHandler(enabled = showSettings) {
         showSettings = false
     }
 
     BackHandler(enabled = !showSettings && state.hasDocument) {
         if (state.busy != null) return@BackHandler
-        fullscreen = false
-        viewModel.closeDocument()
+        if (fullscreen) {
+            fullscreen = false
+        } else {
+            viewModel.closeDocument()
+        }
     }
 
     // 首页已经没有更上一层页面，系统返回手势在真正结束 Activity 前必须再次确认。
@@ -293,14 +327,18 @@ fun InspectorScreen(
                         dock = dock,
                         transparent = transparent,
                         sizeDp = sizeDp,
+                        canDockSide = sideDockSupported,
                         onResize = onResize,
                         fitMode = fitMode,
                         onUserTransform = { fitMode = FitMode.NONE },
-                        onToggleDock = { dock = if (dock == Dock.BOTTOM) Dock.SIDE else Dock.BOTTOM },
+                        onToggleDock = {
+                            dock = if (dock == Dock.BOTTOM && sideDockSupported) Dock.SIDE else Dock.BOTTOM
+                        },
                         onToggleTransparent = {
                             transparent = !transparent
                             fitMode = FitMode.NONE
                         },
+                        onDelete = { showDeleteConfirmation = true },
                     )
                 }
             }
@@ -356,6 +394,30 @@ fun InspectorScreen(
             },
         )
     }
+
+    if (showDeleteConfirmation) {
+        val selectedLabel = state.page
+            ?.let { findNode(it.root, state.selectedId) }
+            ?.label
+            ?.takeIf { it.isNotBlank() }
+            ?: "当前元素"
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmation = false },
+            title = { Text("删除元素？") },
+            text = { Text("将删除“$selectedLabel”，此操作可以使用撤销恢复。") },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmation = false }) { Text("取消") }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirmation = false
+                        viewModel.deleteSelected(context)
+                    },
+                ) { Text("删除") }
+            },
+        )
+    }
 }
 
 @Composable
@@ -365,11 +427,13 @@ private fun Workspace(
     dock: Dock,
     transparent: Boolean,
     sizeDp: Dp,
+    canDockSide: Boolean,
     onResize: (Float) -> Unit,
     fitMode: FitMode,
     onUserTransform: () -> Unit,
     onToggleDock: () -> Unit,
     onToggleTransparent: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val page = state.page ?: return
     val transform = state.pageTransform
@@ -508,12 +572,13 @@ private fun Workspace(
             canDelete = state.selectedId != null,
             dock = dock,
             transparent = transparent,
+            canDockSide = canDockSide,
             onSelect = { id -> viewModel.select(id) },
             onToggleExpand = { id -> viewModel.toggleExpand(id) },
             onToggleRaw = { viewModel.toggleRaw() },
             onToggleDock = onToggleDock,
             onToggleTransparent = onToggleTransparent,
-            onDelete = { viewModel.deleteSelected(context) },
+            onDelete = onDelete,
             onEdit = { id -> viewModel.beginEdit(id) },
         )
     }
@@ -581,6 +646,14 @@ private fun InlineTextEditor(
     // sized field lands the glyphs on that line with no top padding or clipping.
     val fontPx = (rect.height * scale * fontScale).coerceAtLeast(14f)
     val fontSp = with(density) { fontPx.toSp() }
+    val surfaceIsLight = MaterialTheme.colorScheme.surface.luminance() > 0.5f
+    val textIsDark = textColor.luminance() < 0.5f
+    // long: 编辑浮层必须同时适配 PDF 原文字色和应用主题，避免暗色模式下黑字落在深底或白字落在浅底。
+    val editorBackground = if (surfaceIsLight == textIsDark) {
+        MaterialTheme.colorScheme.surface
+    } else {
+        MaterialTheme.colorScheme.inverseSurface
+    }
 
     Box(
         Modifier
@@ -591,8 +664,8 @@ private fun InlineTextEditor(
             modifier = Modifier
                 .offset { IntOffset(left.roundToInt(), top.roundToInt()) }
                 .size(with(density) { widthPx.toDp() }, with(density) { heightPx.toDp() })
-                .background(Color.White)
-                .border(1.dp, textColor.copy(alpha = 0.6f)),
+                .background(editorBackground)
+                .border(1.dp, MaterialTheme.colorScheme.outline),
         ) {
             BasicTextField(
                 value = value,
@@ -659,14 +732,24 @@ private fun HomeScreen(
         ) {
             if (loading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        CircularProgressIndicator()
+                        Text(
+                            "正在准备文档…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             } else {
                 LazyColumn(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .fillMaxWidth()
-                        .widthIn(max = 720.dp),
+                        .widthIn(max = 720.dp)
+                        .fillMaxWidth(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
                         horizontal = 20.dp,
                         vertical = 20.dp,
@@ -708,42 +791,79 @@ private fun HomeScreen(
                         )
                     }
                     item {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            CompactModeCard(
-                                icon = { Icon(TablerIcons.Edit, contentDescription = null) },
-                                title = "编辑 PDF",
-                                detail = "编辑文档内容",
-                                onClick = onOpenEdit,
-                                modifier = Modifier.weight(1f),
-                            )
-                            CompactModeCard(
-                                icon = { Icon(TablerIcons.FileText, contentDescription = null) },
-                                title = "电子书",
-                                detail = "EPUB · TXT",
-                                onClick = onOpenEbook,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    }
-                    if (history.isNotEmpty()) {
-                        item {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(top = 8.dp),
-                            ) {
-                                Icon(
-                                    TablerIcons.History,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp),
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text("阅读历史", style = MaterialTheme.typography.titleMedium)
+                        BoxWithConstraints(Modifier.fillMaxWidth()) {
+                            // long: 窄屏和大字号环境下双列入口容易挤压标题，改为单列后仍保留完整触控区域和信息层级。
+                            if (maxWidth < 320.dp) {
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    CompactModeCard(
+                                        icon = { Icon(TablerIcons.Edit, contentDescription = null) },
+                                        title = "编辑 PDF",
+                                        detail = "编辑文档内容",
+                                        onClick = onOpenEdit,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                    CompactModeCard(
+                                        icon = { Icon(TablerIcons.FileText, contentDescription = null) },
+                                        title = "电子书",
+                                        detail = "EPUB · TXT",
+                                        onClick = onOpenEbook,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
+                            } else {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    CompactModeCard(
+                                        icon = { Icon(TablerIcons.Edit, contentDescription = null) },
+                                        title = "编辑 PDF",
+                                        detail = "编辑文档内容",
+                                        onClick = onOpenEdit,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    CompactModeCard(
+                                        icon = { Icon(TablerIcons.FileText, contentDescription = null) },
+                                        title = "电子书",
+                                        detail = "EPUB · TXT",
+                                        onClick = onOpenEbook,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
                             }
                         }
+                    }
+                    item {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 8.dp),
+                        ) {
+                            Icon(
+                                TablerIcons.History,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("阅读历史", style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
+                    if (history.isEmpty()) {
+                        item {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = MaterialTheme.shapes.medium,
+                                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            ) {
+                                Text(
+                                    "暂无 PDF 阅读记录",
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    } else {
                         items(history, key = { it.uri }) { entry ->
                             HistoryItem(
                                 entry = entry,
@@ -867,31 +987,44 @@ private fun HistoryItem(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 64.dp)
-            .clickable(role = Role.Button, onClick = onClick),
+            .heightIn(min = 64.dp),
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerLowest,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                TablerIcons.FileText,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(entry.title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                Text(
-                    "上次阅读到第 ${entry.pageIndex + 1} 页",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(role = Role.Button, onClick = onClick)
+                    .padding(vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    TablerIcons.FileText,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
                 )
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(entry.title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    Text(
+                        "上次阅读到第 ${entry.pageIndex + 1} 页",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             IconButton(onClick = onDelete) {
-                Icon(TablerIcons.Trash, contentDescription = "移除${entry.title}")
+                Icon(
+                    TablerIcons.Trash,
+                    contentDescription = "移除${entry.title}",
+                    tint = MaterialTheme.colorScheme.error,
+                )
             }
         }
     }
@@ -911,6 +1044,15 @@ private fun BusyOverlay(message: String) {
         contentAlignment = Alignment.Center,
     ) {
         Surface(
+            modifier = Modifier
+                .padding(horizontal = 24.dp)
+                .widthIn(max = 360.dp)
+                .fillMaxWidth()
+                .semantics(mergeDescendants = true) {
+                    contentDescription = message
+                    liveRegion = LiveRegionMode.Polite
+                    progressBarRangeInfo = ProgressBarRangeInfo.Indeterminate
+                },
             shape = RoundedCornerShape(16.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 3.dp,
@@ -921,7 +1063,13 @@ private fun BusyOverlay(message: String) {
             ) {
                 CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.5.dp)
                 Spacer(Modifier.width(14.dp))
-                Text(message, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    message,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 3,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
             }
         }
     }

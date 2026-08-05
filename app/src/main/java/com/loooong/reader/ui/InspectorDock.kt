@@ -19,10 +19,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 
 @Composable
 fun InspectorDock(
@@ -42,7 +47,7 @@ fun InspectorDock(
 
     if (dock == Dock.BOTTOM) {
         Column(modifier) {
-            ResizeHandle(dock, onResizePx)
+            ResizeHandle(dock, sizeDp, onResizePx)
             Surface(
                 modifier = Modifier.fillMaxWidth().height(sizeDp),
                 color = color,
@@ -53,7 +58,7 @@ fun InspectorDock(
         }
     } else {
         Row(modifier) {
-            ResizeHandle(dock, onResizePx)
+            ResizeHandle(dock, sizeDp, onResizePx)
             Surface(
                 modifier = Modifier.width(sizeDp).fillMaxHeight(),
                 color = color,
@@ -66,14 +71,30 @@ fun InspectorDock(
 }
 
 @Composable
-private fun ResizeHandle(dock: Dock, onResizePx: (Float) -> Unit) {
+private fun ResizeHandle(dock: Dock, sizeDp: Dp, onResizePx: (Float) -> Unit) {
     val grip = MaterialTheme.colorScheme.outlineVariant
+    val resizeStepPx = with(LocalDensity.current) { 32.dp.toPx() }
+    // long: 拖拽之外提供固定步进动作，让 TalkBack 用户也能调整检查器所占空间。
+    val resizeSemantics = Modifier.semantics {
+        contentDescription = "调整检查器面板大小"
+        stateDescription = "${sizeDp.value.roundToInt()} dp"
+        customActions = listOf(
+            CustomAccessibilityAction("增大检查器面板") {
+                onResizePx(-resizeStepPx)
+                true
+            },
+            CustomAccessibilityAction("缩小检查器面板") {
+                onResizePx(resizeStepPx)
+                true
+            },
+        )
+    }
     if (dock == Dock.BOTTOM) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(40.dp)
-                .semantics { contentDescription = "调整检查器面板大小" }
+                .then(resizeSemantics)
                 .pointerInput(Unit) {
                     detectVerticalDragGestures { change, dy ->
                         change.consume()
@@ -89,7 +110,7 @@ private fun ResizeHandle(dock: Dock, onResizePx: (Float) -> Unit) {
             modifier = Modifier
                 .fillMaxHeight()
                 .width(40.dp)
-                .semantics { contentDescription = "调整检查器面板大小" }
+                .then(resizeSemantics)
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures { change, dx ->
                         change.consume()

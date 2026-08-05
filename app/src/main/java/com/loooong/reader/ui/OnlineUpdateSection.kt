@@ -12,11 +12,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -27,12 +27,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import compose.icons.TablerIcons
 import compose.icons.tablericons.CloudDownload
+import compose.icons.tablericons.DeviceFloppy
 import compose.icons.tablericons.ExternalLink
 import compose.icons.tablericons.Refresh
+import compose.icons.tablericons.Settings
 import com.loooong.reader.BuildConfig
 import com.loooong.reader.OnlineUpdateManager
 import com.loooong.reader.PendingUpdateDownload
@@ -56,10 +59,11 @@ internal fun OnlineUpdateSection() {
     val manager = remember(context.applicationContext) { OnlineUpdateManager(context) }
     var state by remember { mutableStateOf<OnlineUpdateUiState>(OnlineUpdateUiState.Idle) }
     var activeDownload by remember { mutableStateOf<PendingUpdateDownload?>(null) }
+    var operationInFlight by remember { mutableStateOf(false) }
 
     val beginInstall: (PendingUpdateDownload) -> Unit = { pending ->
+        state = OnlineUpdateUiState.Installing(pending.tagName)
         scope.launch {
-            state = OnlineUpdateUiState.Installing(pending.tagName)
             state = when (val result = withContext(Dispatchers.IO) { manager.install(pending) }) {
                 UpdateInstallResult.Started -> OnlineUpdateUiState.InstallRequested(pending.tagName)
                 is UpdateInstallResult.Failed -> OnlineUpdateUiState.InstallFailed(
@@ -74,50 +78,62 @@ internal fun OnlineUpdateSection() {
         ActivityResultContracts.StartActivityForResult(),
     ) {
         val pending = activeDownload ?: return@rememberLauncherForActivityResult
+        if (operationInFlight) return@rememberLauncherForActivityResult
+        operationInFlight = true
+        state = OnlineUpdateUiState.CheckingInstallPermission(pending.tagName)
         scope.launch {
-            state = OnlineUpdateUiState.CheckingInstallPermission(pending.tagName)
-            // long: 授权页返回时 PackageManager 仍可能繁忙，避免 Binder 查询阻塞主线程并触发输入 ANR。
-            val canInstall = runCatching {
-                withContext(Dispatchers.IO) { manager.canRequestPackageInstalls() }
-            }.getOrElse { error ->
-                state = OnlineUpdateUiState.InstallFailed(
-                    tagName = pending.tagName,
-                    message = error.message?.takeIf { it.isNotBlank() } ?: "无法确认安装授权状态",
-                )
-                return@launch
-            }
-            if (canInstall) {
-                beginInstall(pending)
-            } else {
-                state = OnlineUpdateUiState.PermissionRequired(pending.tagName)
+            try {
+                // long: 授权页返回时 PackageManager 仍可能繁忙，避免 Binder 查询阻塞主线程并触发输入 ANR。
+                val canInstall = runCatching {
+                    withContext(Dispatchers.IO) { manager.canRequestPackageInstalls() }
+                }.getOrElse { error ->
+                    state = OnlineUpdateUiState.InstallFailed(
+                        tagName = pending.tagName,
+                        message = error.message?.takeIf { it.isNotBlank() } ?: "无法确认安装授权状态",
+                    )
+                    return@launch
+                }
+                if (canInstall) {
+                    beginInstall(pending)
+                } else {
+                    state = OnlineUpdateUiState.PermissionRequired(pending.tagName)
+                }
+            } finally {
+                operationInFlight = false
             }
         }
     }
 
-    val requestInstall: (PendingUpdateDownload) -> Unit = { pending ->
+    val requestInstall: (PendingUpdateDownload) -> Unit = requestInstall@{ pending ->
+        if (operationInFlight) return@requestInstall
+        operationInFlight = true
+        state = OnlineUpdateUiState.CheckingInstallPermission(pending.tagName)
         scope.launch {
-            state = OnlineUpdateUiState.CheckingInstallPermission(pending.tagName)
-            // long: 安装权限检查和 APK 会话写入都可能触发磁盘或系统服务等待，整条准备链路均不得占用主线程。
-            val canInstall = runCatching {
-                withContext(Dispatchers.IO) { manager.canRequestPackageInstalls() }
-            }.getOrElse { error ->
-                state = OnlineUpdateUiState.InstallFailed(
-                    tagName = pending.tagName,
-                    message = error.message?.takeIf { it.isNotBlank() } ?: "无法确认安装授权状态",
-                )
-                return@launch
-            }
-            if (canInstall) {
-                beginInstall(pending)
-            } else {
-                state = OnlineUpdateUiState.PermissionRequired(pending.tagName)
-                runCatching { permissionLauncher.launch(manager.unknownSourcesSettingsIntent()) }
-                    .onFailure {
-                        state = OnlineUpdateUiState.InstallFailed(
-                            tagName = pending.tagName,
-                            message = "无法打开未知来源应用授权页面",
-                        )
-                    }
+            try {
+                // long: 安装权限检查和 APK 会话写入都可能触发磁盘或系统服务等待，整条准备链路均不得占用主线程。
+                val canInstall = runCatching {
+                    withContext(Dispatchers.IO) { manager.canRequestPackageInstalls() }
+                }.getOrElse { error ->
+                    state = OnlineUpdateUiState.InstallFailed(
+                        tagName = pending.tagName,
+                        message = error.message?.takeIf { it.isNotBlank() } ?: "无法确认安装授权状态",
+                    )
+                    return@launch
+                }
+                if (canInstall) {
+                    beginInstall(pending)
+                } else {
+                    state = OnlineUpdateUiState.PermissionRequired(pending.tagName)
+                    runCatching { permissionLauncher.launch(manager.unknownSourcesSettingsIntent()) }
+                        .onFailure {
+                            state = OnlineUpdateUiState.InstallFailed(
+                                tagName = pending.tagName,
+                                message = "无法打开未知来源应用授权页面",
+                            )
+                        }
+                }
+            } finally {
+                operationInFlight = false
             }
         }
     }
@@ -163,7 +179,7 @@ internal fun OnlineUpdateSection() {
         }
     }
 
-    val checkAllowed = when (state) {
+    val checkAllowed = !operationInFlight && when (state) {
         OnlineUpdateUiState.Idle,
         is OnlineUpdateUiState.UpToDate,
         is OnlineUpdateUiState.Available,
@@ -171,43 +187,59 @@ internal fun OnlineUpdateSection() {
         -> activeDownload == null
         else -> false
     }
-    val checkUpdates = {
-        if (checkAllowed) {
-            scope.launch {
-                state = OnlineUpdateUiState.Checking
+    val checkUpdates: () -> Unit = checkUpdates@{
+        if (!checkAllowed || operationInFlight) return@checkUpdates
+        // long: 点击事件内同步占用操作锁，避免重组前的连续点击并发发起多个网络检查。
+        operationInFlight = true
+        state = OnlineUpdateUiState.Checking
+        scope.launch {
+            try {
                 state = when (val result = UpdateChecker.check(BuildConfig.VERSION_NAME)) {
                     is UpdateCheckResult.Available -> OnlineUpdateUiState.Available(result.release)
                     is UpdateCheckResult.UpToDate -> OnlineUpdateUiState.UpToDate(result.release.tagName)
                     is UpdateCheckResult.Failed -> OnlineUpdateUiState.Failed(result.message)
                 }
+            } finally {
+                operationInFlight = false
             }
         }
     }
-    val startDownload: (ReleaseInfo) -> Unit = { release ->
+    val startDownload: (ReleaseInfo) -> Unit = startDownload@{ release ->
+        if (operationInFlight || state !is OnlineUpdateUiState.Available) return@startDownload
+        // long: 下载任务必须在首次点击时立即锁定，防止系统 DownloadManager 被重复入队。
+        operationInFlight = true
+        state = OnlineUpdateUiState.StartingDownload(release.tagName)
         scope.launch {
-            state = OnlineUpdateUiState.StartingDownload(release.tagName)
-            runCatching {
-                withContext(Dispatchers.IO) { manager.startDownload(release) }
-            }.onSuccess { pending ->
-                activeDownload = pending
-                state = OnlineUpdateUiState.Downloading(
-                    tagName = pending.tagName,
-                    progressPercent = null,
-                    downloadedBytes = 0L,
-                    totalBytes = -1L,
-                    message = "等待开始下载",
-                )
-            }.onFailure { error ->
-                state = OnlineUpdateUiState.Failed(
-                    error.message?.takeIf { it.isNotBlank() } ?: "无法创建更新下载任务",
-                )
+            try {
+                runCatching {
+                    withContext(Dispatchers.IO) { manager.startDownload(release) }
+                }.onSuccess { pending ->
+                    activeDownload = pending
+                    state = OnlineUpdateUiState.Downloading(
+                        tagName = pending.tagName,
+                        progressPercent = null,
+                        downloadedBytes = 0L,
+                        totalBytes = -1L,
+                        message = "等待开始下载",
+                    )
+                }.onFailure { error ->
+                    state = OnlineUpdateUiState.Failed(
+                        error.message?.takeIf { it.isNotBlank() } ?: "无法创建更新下载任务",
+                    )
+                }
+            } finally {
+                operationInFlight = false
             }
         }
     }
 
     Column(Modifier.fillMaxWidth()) {
         ListItem(
-            modifier = Modifier.clickable(enabled = checkAllowed, onClick = checkUpdates),
+            modifier = Modifier.clickable(
+                enabled = checkAllowed,
+                role = Role.Button,
+                onClick = checkUpdates,
+            ),
             headlineContent = { Text("在线更新") },
             supportingContent = { OnlineUpdateStatus(state) },
             leadingContent = { Icon(TablerIcons.CloudDownload, contentDescription = null) },
@@ -219,9 +251,7 @@ internal fun OnlineUpdateSection() {
                     is OnlineUpdateUiState.Installing,
                     -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
                     else -> if (checkAllowed) {
-                        IconButton(onClick = checkUpdates) {
-                            Icon(TablerIcons.Refresh, contentDescription = "立即检查")
-                        }
+                        Icon(TablerIcons.Refresh, contentDescription = null)
                     }
                 }
             },
@@ -247,12 +277,14 @@ internal fun OnlineUpdateSection() {
                 title = "${current.tagName} 已下载完成",
                 description = "安装过程由 Android 系统确认，不会静默替换应用。",
                 buttonText = "安装更新",
+                icon = TablerIcons.DeviceFloppy,
                 onClick = { activeDownload?.let(requestInstall) },
             )
             is OnlineUpdateUiState.PermissionRequired -> UpdateInstallDetails(
                 title = "需要允许安装未知来源应用",
                 description = "请允许阅读安装已下载的更新，然后返回继续。",
                 buttonText = "授权并继续安装",
+                icon = TablerIcons.Settings,
                 onClick = { activeDownload?.let(requestInstall) },
             )
             is OnlineUpdateUiState.CheckingInstallPermission -> UpdateProgressDetails(
@@ -269,12 +301,14 @@ internal fun OnlineUpdateSection() {
                 title = "已打开系统安装器",
                 description = "请按系统提示确认更新；取消后可以重新发起安装。",
                 buttonText = "重新发起安装",
+                icon = TablerIcons.Refresh,
                 onClick = { activeDownload?.let(requestInstall) },
             )
             is OnlineUpdateUiState.InstallFailed -> UpdateInstallDetails(
                 title = "安装准备失败",
                 description = current.message,
                 buttonText = "重试安装",
+                icon = TablerIcons.Refresh,
                 onClick = { activeDownload?.let(requestInstall) },
             )
             else -> Unit
@@ -288,6 +322,8 @@ private fun UpdateAvailableDetails(
     onDownload: () -> Unit,
     onOpenRelease: () -> Unit,
 ) {
+    var notesExpanded by remember(release.tagName) { mutableStateOf(false) }
+    var notesCanExpand by remember(release.tagName) { mutableStateOf(false) }
     Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -299,17 +335,35 @@ private fun UpdateAvailableDetails(
                 release.notes,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 8,
+                maxLines = if (notesExpanded) Int.MAX_VALUE else 8,
                 overflow = TextOverflow.Ellipsis,
+                onTextLayout = { result ->
+                    if (!notesExpanded && result.hasVisualOverflow) notesCanExpand = true
+                },
             )
+            if (notesCanExpand) {
+                TextButton(onClick = { notesExpanded = !notesExpanded }) {
+                    Text(if (notesExpanded) "收起版本说明" else "展开版本说明")
+                }
+            }
         }
-        FilledTonalButton(onClick = if (release.downloadUrl != null) onDownload else onOpenRelease) {
+        FilledTonalButton(
+            onClick = if (release.downloadUrl != null) onDownload else onOpenRelease,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
             Icon(
                 if (release.downloadUrl != null) TablerIcons.CloudDownload else TablerIcons.ExternalLink,
                 contentDescription = null,
             )
             Spacer(Modifier.size(8.dp))
             Text(if (release.downloadUrl != null) "下载并安装" else "查看版本")
+        }
+        if (release.downloadUrl != null) {
+            TextButton(onClick = onOpenRelease, modifier = Modifier.fillMaxWidth()) {
+                Icon(TablerIcons.ExternalLink, contentDescription = null)
+                Spacer(Modifier.size(8.dp))
+                Text("打开完整发布页面")
+            }
         }
     }
 }
@@ -346,6 +400,7 @@ private fun UpdateInstallDetails(
     title: String,
     description: String,
     buttonText: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     onClick: () -> Unit,
 ) {
     Column(
@@ -359,7 +414,7 @@ private fun UpdateInstallDetails(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         FilledTonalButton(onClick = onClick) {
-            Icon(TablerIcons.CloudDownload, contentDescription = null)
+            Icon(icon, contentDescription = null)
             Spacer(Modifier.size(8.dp))
             Text(buttonText)
         }

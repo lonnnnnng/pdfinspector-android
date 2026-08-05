@@ -3,7 +3,9 @@ package com.loooong.reader.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,6 +18,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -25,14 +29,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,6 +49,7 @@ import compose.icons.tablericons.Code
 import compose.icons.tablericons.Braces
 import compose.icons.tablericons.ChevronRight
 import compose.icons.tablericons.Droplet
+import compose.icons.tablericons.Dots
 import compose.icons.tablericons.Edit
 import compose.icons.tablericons.LayoutBottombar
 import compose.icons.tablericons.LayoutSidebarRight
@@ -52,6 +60,7 @@ import compose.icons.tablericons.VectorBeizer
 import com.loooong.reader.engine.DrawNode
 import com.loooong.reader.engine.NodeKind
 import com.loooong.reader.engine.ParsedPage
+import java.util.Locale
 
 private class TreeRow(
     val node: DrawNode,
@@ -71,6 +80,7 @@ fun InspectorPane(
     canDelete: Boolean,
     dock: Dock,
     transparent: Boolean,
+    canDockSide: Boolean,
     onSelect: (Int) -> Unit,
     onToggleExpand: (Int) -> Unit,
     onToggleRaw: () -> Unit,
@@ -81,52 +91,114 @@ fun InspectorPane(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxWidth()) {
-        Row(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "元素检查器",
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    "${page.leaves.size} 个元素",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            IconToggleButton(checked = showRaw, onCheckedChange = { onToggleRaw() }) {
-                Icon(TablerIcons.Code, "切换原始运算符", Modifier.size(20.dp))
-            }
-            IconButton(onClick = onToggleDock) {
-                Icon(
-                    imageVector = if (dock == Dock.BOTTOM) TablerIcons.LayoutSidebarRight else TablerIcons.LayoutBottombar,
-                    contentDescription = "切换面板停靠位置",
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-            IconToggleButton(checked = transparent, onCheckedChange = { onToggleTransparent() }) {
-                Icon(TablerIcons.Droplet, "切换透明模式", Modifier.size(20.dp))
-            }
-            FilledTonalIconButton(
-                onClick = onDelete,
-                enabled = canDelete,
-                colors = IconButtonDefaults.filledTonalIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                ),
+            val compactHeader = maxWidth < 360.dp
+            var menuExpanded by remember { mutableStateOf(false) }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(TablerIcons.Trash, "删除元素", Modifier.size(20.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "元素检查器",
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "${page.leaves.size} 个元素",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (compactHeader) {
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(TablerIcons.Dots, "更多检查器操作", Modifier.size(20.dp))
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(if (showRaw) "隐藏原始运算符" else "显示原始运算符") },
+                                leadingIcon = { Icon(TablerIcons.Code, contentDescription = null) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onToggleRaw()
+                                },
+                            )
+                            if (canDockSide || dock == Dock.SIDE) {
+                                DropdownMenuItem(
+                                    text = { Text(if (dock == Dock.BOTTOM) "停靠到右侧" else "停靠到底部") },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (dock == Dock.BOTTOM) {
+                                                TablerIcons.LayoutSidebarRight
+                                            } else {
+                                                TablerIcons.LayoutBottombar
+                                            },
+                                            contentDescription = null,
+                                        )
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onToggleDock()
+                                    },
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text(if (transparent) "关闭透明模式" else "开启透明模式") },
+                                leadingIcon = { Icon(TablerIcons.Droplet, contentDescription = null) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onToggleTransparent()
+                                },
+                            )
+                        }
+                    }
+                } else {
+                    IconToggleButton(checked = showRaw, onCheckedChange = { onToggleRaw() }) {
+                        Icon(TablerIcons.Code, "切换原始运算符", Modifier.size(20.dp))
+                    }
+                    IconButton(
+                        onClick = onToggleDock,
+                        enabled = canDockSide || dock == Dock.SIDE,
+                    ) {
+                        Icon(
+                            imageVector = if (dock == Dock.BOTTOM) {
+                                TablerIcons.LayoutSidebarRight
+                            } else {
+                                TablerIcons.LayoutBottombar
+                            },
+                            contentDescription = "切换面板停靠位置",
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    IconToggleButton(checked = transparent, onCheckedChange = { onToggleTransparent() }) {
+                        Icon(TablerIcons.Droplet, "切换透明模式", Modifier.size(20.dp))
+                    }
+                }
+                FilledTonalIconButton(
+                    onClick = onDelete,
+                    enabled = canDelete,
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                ) {
+                    Icon(TablerIcons.Trash, "删除元素", Modifier.size(20.dp))
+                }
             }
         }
         HorizontalDivider()
@@ -179,10 +251,8 @@ private fun TreeRowItem(
         modifier = Modifier
             .fillMaxWidth()
             .background(background)
-            .semantics { this.selected = selected }
-            .clickable { onSelect(node.id) }
             .heightIn(min = 52.dp)
-            .padding(start = (4 + row.depth * 16).dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            .padding(end = 8.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (row.hasChildren) {
@@ -199,38 +269,54 @@ private fun TreeRowItem(
         } else {
             Spacer(Modifier.size(48.dp))
         }
-        KindBadge(node.kind)
-        Spacer(Modifier.width(8.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = node.label,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            val secondary = if (showRaw) node.raw else node.detail
-            if (secondary.isNotEmpty()) {
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = (4 + row.depth * 16).dp)
+                .selectable(
+                    selected = selected,
+                    onClick = { onSelect(node.id) },
+                    role = Role.Tab,
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            KindBadge(node.kind)
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
                 Text(
-                    text = secondary,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontFamily = if (showRaw) FontFamily.Monospace else FontFamily.Default,
-                    maxLines = if (showRaw) 3 else 1,
+                    text = node.label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                val secondary = if (showRaw) node.raw else node.detail
+                if (secondary.isNotEmpty()) {
+                    Text(
+                        text = secondary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = if (showRaw) FontFamily.Monospace else FontFamily.Default,
+                        maxLines = if (showRaw) 3 else 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
-        }
-        swatchColor?.let { argb ->
-            Spacer(Modifier.width(8.dp))
-            Box(
-                Modifier
-                    .size(18.dp)
-                    .clip(MaterialTheme.shapes.extraSmall)
-                    .background(Color(argb))
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.extraSmall)
-                    .semantics { contentDescription = "元素颜色 ${argb.toUInt().toString(16)}" },
-            )
+            swatchColor?.let { argb ->
+                val hex = String.format(Locale.US, "#%08X", argb)
+                val alphaPercent = ((argb ushr 24) * 100 / 255)
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    Modifier
+                        .size(18.dp)
+                        .clip(MaterialTheme.shapes.extraSmall)
+                        .background(Color(argb))
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.extraSmall)
+                        .semantics {
+                            contentDescription = "元素颜色 $hex，透明度 $alphaPercent%，仅预览"
+                        },
+                )
+            }
         }
         if (selected && node.kind != NodeKind.GROUP) {
             IconButton(onClick = { onEdit(node.id) }) {

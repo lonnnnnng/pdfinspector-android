@@ -144,8 +144,8 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openHistory(activity: Activity, entry: EbookHistoryEntry) {
         val generation = beginOpenRequest()
+        screen = EbookScreen.Loading("正在恢复上次阅读…")
         openJob = viewModelScope.launch {
-            screen = EbookScreen.Loading("正在恢复上次阅读…")
             // long: 最近阅读优先使用应用内副本，原文件移动、授权失效或网络断开时仍能继续阅读。
             val source = withContext(Dispatchers.IO) { cachedHistorySource(entry) }
                 ?: runCatching {
@@ -223,11 +223,14 @@ class EbookViewModel(application: Application) : AndroidViewModel(application) {
             }
             EbookFormat.EPUB -> {
                 val publication = runCatching {
-                    streamer.open(
-                        FileAsset(source.file),
-                        allowUserInteraction = true,
-                        sender = activity,
-                    ).getOrThrow()
+                    // long: EPUB 解压、清单解析会阻塞调用线程；放到 IO 线程后 Loading 页面能及时绘制，避免最近阅读入口出现白屏。
+                    withContext(Dispatchers.IO) {
+                        streamer.open(
+                            FileAsset(source.file),
+                            allowUserInteraction = true,
+                            sender = activity,
+                        ).getOrThrow()
+                    }
                 }.getOrElse {
                     if (generation == openGeneration) {
                         screen = EbookScreen.Error(it.userFacingMessage("EPUB 文件解析失败"))

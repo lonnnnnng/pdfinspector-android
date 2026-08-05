@@ -286,6 +286,9 @@ private fun PageIndicator(pageIndex: Int, pageCount: Int) {
     Text(
         text = "${pageIndex + 1} / $pageCount",
         style = MaterialTheme.typography.labelLarge,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Ellipsis,
         modifier = Modifier
             .padding(horizontal = 4.dp)
             .semantics { contentDescription = "第 ${pageIndex + 1} 页，共 $pageCount 页" },
