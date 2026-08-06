@@ -9,8 +9,10 @@ import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Ignore
 import org.junit.Test
 import java.io.ByteArrayOutputStream
+import java.util.Base64
 
 // These stay path-only / font-free so they run on a plain JVM. The text
 // re-encode success path needs the font AFMs that pdfbox-android ships as
@@ -36,6 +38,187 @@ class ElementEditorTest {
 
         val moved = ContentStreamEngine.parse(page).leaves.first { it.kind == NodeKind.PATH }
         assertEquals(before + 10f, moved.bounds!!.minX, 0.5f)
+        doc.close()
+    }
+
+    @Test
+    fun rotatingPathAroundCenterUpdatesBounds() {
+        val doc = PDDocument.load(pathPdf())
+        val page = doc.getPage(0)
+        val parsed = ContentStreamEngine.parse(page)
+        val path = parsed.leaves.first { it.kind == NodeKind.PATH }
+
+        val result = ElementEditor.editElement(
+            doc,
+            page,
+            parsed.tokens,
+            path,
+            EditRequest(rotationDegrees = 90f, pivotX = 150f, pivotY = 100f),
+        )
+
+        assertTrue(result is EditResult.Applied)
+        val rotated = ContentStreamEngine.parse(page).leaves.first { it.kind == NodeKind.PATH }
+        assertEquals(100f, rotated.bounds!!.minX, 0.5f)
+        assertEquals(0f, rotated.bounds!!.minY, 0.5f)
+        assertEquals(200f, rotated.bounds!!.maxX, 0.5f)
+        assertEquals(200f, rotated.bounds!!.maxY, 0.5f)
+        doc.close()
+    }
+
+    @Test
+    fun insertingTextAddsFontResourceAndTextOperators() {
+        val doc = PDDocument.load(pathPdf())
+        val page = doc.getPage(0)
+        val parsed = ContentStreamEngine.parse(page)
+
+        val result = ElementEditor.insertText(
+            doc,
+            page,
+            parsed.tokens,
+            TextInsertRequest("Hello", 80f, 120f, 18f, PDType1Font.HELVETICA, 0xFF202124.toInt()),
+        )
+
+        assertTrue(result is EditResult.Applied)
+        val operators = (result as EditResult.Applied).tokens.filterIsInstance<Operator>().map { it.name }
+        assertTrue(operators.contains("BT"))
+        assertTrue(operators.contains("Tj"))
+        assertTrue(page.resources.fontNames.any())
+        doc.close()
+    }
+
+    @Test
+    @Ignore("PDFBox Android image factory requires a real Android Bitmap runtime")
+    fun insertingImageAddsXObjectAndDoOperator() {
+        val doc = PDDocument.load(pathPdf())
+        val page = doc.getPage(0)
+        val parsed = ContentStreamEngine.parse(page)
+        val png = Base64.getDecoder().decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        )
+
+        val result = ElementEditor.insertImage(
+            doc,
+            page,
+            parsed.tokens,
+            ImageInsertRequest(png, 80f, 120f, 48f, 48f),
+        )
+
+        assertTrue(result is EditResult.Applied)
+        val operators = (result as EditResult.Applied).tokens.filterIsInstance<Operator>().map { it.name }
+        assertTrue(operators.contains("Do"))
+        assertTrue(page.resources.xObjectNames.any())
+        doc.close()
+    }
+
+    @Test
+    fun emptyImageInsertionIsRejectedBeforeBitmapDecode() {
+        val doc = PDDocument()
+        val page = PDPage()
+        doc.addPage(page)
+
+        val result = ElementEditor.insertImage(
+            doc,
+            page,
+            emptyList(),
+            ImageInsertRequest(ByteArray(0), 0f, 0f, 48f, 48f),
+        )
+
+        assertTrue(result is EditResult.NoChange)
+        doc.close()
+    }
+
+    @Test
+    fun pastingPathDuplicatesItWithVisibleOffset() {
+        val doc = PDDocument.load(pathPdf())
+        val page = doc.getPage(0)
+        val parsed = ContentStreamEngine.parse(page)
+        val path = parsed.leaves.first { it.kind == NodeKind.PATH }
+        val copied = path.stream!!.tokens.subList(path.startIndex, path.endIndex + 1).toList()
+
+        val result = ElementEditor.pasteNode(
+            doc,
+            page,
+            parsed.tokens,
+            copied,
+            path.stream.resources,
+            24f,
+            24f,
+        )
+
+        assertTrue(result is EditResult.Applied)
+        val paths = ContentStreamEngine.parse(page).leaves.filter { it.kind == NodeKind.PATH }
+        assertEquals(2, paths.size)
+        assertEquals(50f, paths[0].bounds!!.minX, 0.5f)
+        assertEquals(74f, paths[1].bounds!!.minX, 0.5f)
+        assertEquals(74f, paths[1].bounds!!.minY, 0.5f)
+        doc.close()
+    }
+
+    @Test
+    fun batchDeleteWritesOnePageStream() {
+        val doc = PDDocument()
+        val page = PDPage()
+        doc.addPage(page)
+        val tokens = listOf<Any>(
+            COSFloat(0f), COSFloat(0f), COSFloat(10f), COSFloat(10f), Operator.getOperator("re"),
+            Operator.getOperator("f"),
+            COSFloat(20f), COSFloat(0f), COSFloat(10f), COSFloat(10f), Operator.getOperator("re"),
+            Operator.getOperator("f"),
+        )
+        val stream = ParsedStream(StreamOwner.Page(page), tokens, page.resources)
+        val first = DrawNode(1, NodeKind.PATH, "a", "", 0, 5, Bounds(0f, 0f, 10f, 10f), null, "", emptyList(), ctm = Affine.IDENTITY, stream = stream)
+        val second = DrawNode(2, NodeKind.PATH, "b", "", 6, 11, Bounds(20f, 0f, 30f, 10f), null, "", emptyList(), ctm = Affine.IDENTITY, stream = stream)
+
+        val result = ElementEditor.deleteNodes(doc, page, listOf(first, second))
+        assertTrue(result is EditResult.Applied)
+        assertTrue(ContentStreamEngine.parse(page).leaves.none { it.kind == NodeKind.PATH })
+        doc.close()
+    }
+
+    @Test
+    fun batchTransformMovesMultipleObjectsInOneRewrite() {
+        val doc = PDDocument()
+        val page = PDPage()
+        doc.addPage(page)
+        val tokens = listOf<Any>(
+            COSFloat(0f), COSFloat(0f), COSFloat(10f), COSFloat(10f), Operator.getOperator("re"),
+            Operator.getOperator("f"),
+            COSFloat(20f), COSFloat(0f), COSFloat(10f), COSFloat(10f), Operator.getOperator("re"),
+            Operator.getOperator("f"),
+        )
+        val stream = ParsedStream(StreamOwner.Page(page), tokens, page.resources)
+        val first = DrawNode(1, NodeKind.PATH, "a", "", 0, 5, Bounds(0f, 0f, 10f, 10f), null, "", emptyList(), ctm = Affine.IDENTITY, stream = stream)
+        val second = DrawNode(2, NodeKind.PATH, "b", "", 6, 11, Bounds(20f, 0f, 30f, 10f), null, "", emptyList(), ctm = Affine.IDENTITY, stream = stream)
+
+        val result = ElementEditor.editElements(
+            doc,
+            page,
+            listOf(
+                first to EditRequest(dx = 10f),
+                second to EditRequest(dx = -10f),
+            ),
+        )
+        assertTrue(result is EditResult.Applied)
+        val paths = ContentStreamEngine.parse(page).leaves.filter { it.kind == NodeKind.PATH }
+        assertEquals(10f, paths[0].bounds!!.minX, 0.5f)
+        assertEquals(10f, paths[1].bounds!!.minX, 0.5f)
+        doc.close()
+    }
+
+    @Test
+    fun reorderRangeMovesWholeQqBlock() {
+        val doc = PDDocument()
+        val page = PDPage()
+        doc.addPage(page)
+        val tokens = listOf<Any>(
+            Operator.getOperator("q"), COSFloat(1f), Operator.getOperator("Q"),
+            Operator.getOperator("q"), COSFloat(2f), Operator.getOperator("Q"),
+        )
+        val stream = ParsedStream(StreamOwner.Page(page), tokens, page.resources)
+        val result = ElementEditor.reorderRange(doc, page, stream, 0, 2, 6)
+        assertTrue(result is EditResult.Applied)
+        val floats = (result as EditResult.Applied).tokens.filterIsInstance<COSFloat>().map { it.floatValue() }
+        assertEquals(listOf(2f, 1f), floats)
         doc.close()
     }
 

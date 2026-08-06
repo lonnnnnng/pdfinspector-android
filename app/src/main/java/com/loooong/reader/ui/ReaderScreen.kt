@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -80,6 +81,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
@@ -96,6 +98,7 @@ import compose.icons.tablericons.Edit
 import compose.icons.tablericons.FileSearch
 import compose.icons.tablericons.GridDots
 import compose.icons.tablericons.Maximize
+import compose.icons.tablericons.Minimize
 import compose.icons.tablericons.Search
 import compose.icons.tablericons.X
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -271,25 +274,35 @@ fun ReaderScreen(
         },
     ) { innerPadding ->
         // long: 阅读到底时保持页面稳定，并限制大屏页宽，避免横屏和平板上 PDF 被拉伸到难以浏览的尺寸。
-        CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                items(readerState.pageInfos, key = { it.pageIndex }) { info ->
-                    ReaderPage(
-                        viewModel = viewModel,
-                        info = info,
-                        documentToken = state.documentToken,
-                        onZoom = { zoomPage = info.pageIndex },
-                        modifier = Modifier.widthIn(max = 900.dp).fillMaxWidth(),
-                    )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+        ) {
+            CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    items(readerState.pageInfos, key = { it.pageIndex }) { info ->
+                        ReaderPage(
+                            viewModel = viewModel,
+                            info = info,
+                            documentToken = state.documentToken,
+                            onZoom = { zoomPage = info.pageIndex },
+                            modifier = Modifier.widthIn(max = 900.dp).fillMaxWidth(),
+                        )
+                    }
                 }
+            }
+            if (fullscreen) {
+                FullscreenExitButton(
+                    modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+                    onClick = onToggleFullscreen,
+                )
             }
         }
     }
@@ -398,6 +411,23 @@ private fun ReaderBottomAction(
 }
 
 @Composable
+private fun FullscreenExitButton(
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+        tonalElevation = 3.dp,
+    ) {
+        IconButton(onClick = onClick) {
+            Icon(TablerIcons.Minimize, contentDescription = "退出全屏")
+        }
+    }
+}
+
+@Composable
 private fun ReaderPage(
     viewModel: PdfDocumentViewModel,
     info: ReaderPageInfo,
@@ -407,16 +437,20 @@ private fun ReaderPage(
 ) {
     BoxWithConstraints(modifier) {
         val targetWidth = constraints.maxWidth.coerceAtLeast(1)
-        LaunchedEffect(documentToken, info.pageIndex, targetWidth) {
+        var retryTick by remember(info.pageIndex) { mutableIntStateOf(0) }
+        LaunchedEffect(documentToken, info.pageIndex, targetWidth, retryTick) {
             viewModel.ensureReaderPage(info.pageIndex, targetWidth)
         }
         val page = viewModel.readerPages[info.pageIndex]
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(info.widthPoints / info.heightPoints)
-                    .clickable(onClick = onZoom),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(info.widthPoints / info.heightPoints)
+                            .clickable(role = Role.Button, onClick = onZoom)
+                            .semantics {
+                                contentDescription = "第 ${info.pageIndex + 1} 页，点击放大查看"
+                            },
                 shape = MaterialTheme.shapes.small,
                 color = MaterialTheme.colorScheme.surfaceContainerLowest,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -429,10 +463,20 @@ private fun ReaderPage(
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.FillBounds,
                         )
-                        page?.error != null -> Text(
-                            page.error,
-                            color = MaterialTheme.colorScheme.error,
-                        )
+                        page?.error != null -> Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(20.dp),
+                        ) {
+                            Text(
+                                page.error,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            TextButton(onClick = { retryTick++ }) {
+                                Text("重新加载")
+                            }
+                        }
                         else -> CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
                     }
                 }
@@ -465,7 +509,10 @@ private fun ReaderZoomDialog(
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.fillMaxSize()) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = onDismiss) {
@@ -486,7 +533,7 @@ private fun ReaderZoomDialog(
                         scaleState = scaleState,
                         offsetState = offsetState,
                         leaves = emptyList(),
-                        selectedRect = null,
+                        selectedRects = emptyList(),
                         highlightColor = MaterialTheme.colorScheme.primary,
                         backdropColor = MaterialTheme.colorScheme.surfaceVariant,
                         runBoxes = emptyList(),
@@ -496,6 +543,7 @@ private fun ReaderZoomDialog(
                         fitMode = FitMode.WIDTH,
                         onUserTransform = {},
                         onSelect = {},
+                        onToggleSelect = {},
                         renderTile = { pageIndex, src, outW, outH ->
                             // long: 阅读位图按屏幕宽度生成，而高清区域接口使用 144-DPI 坐标，先换算可避免 tile 覆盖后被放大裁切。
                             val renderSource = mapReaderTileToRenderCoordinates(
@@ -517,7 +565,10 @@ private fun ReaderZoomDialog(
                             )?.asImageBitmap()
                         },
                         // long: 放大画布只占工具栏下方的剩余空间，避免按整屏测量后被父容器裁切并产生错误适宽比例。
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .navigationBarsPadding(),
                     )
                 }
             }

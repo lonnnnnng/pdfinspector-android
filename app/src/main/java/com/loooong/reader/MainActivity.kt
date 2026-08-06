@@ -45,6 +45,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -113,6 +114,7 @@ import com.loooong.reader.ui.InspectorDock
 import com.loooong.reader.ui.InspectorPane
 import com.loooong.reader.ui.InspectorToolbar
 import com.loooong.reader.ui.LeafRect
+import com.loooong.reader.ui.ObjectTransformOverlay
 import com.loooong.reader.ui.PdfCanvas
 import com.loooong.reader.ui.ReaderScreen
 import com.loooong.reader.ui.SettingsScreen
@@ -156,6 +158,11 @@ fun InspectorScreen(
     var showExitConfirmation by rememberSaveable { mutableStateOf(false) }
     var showDeleteConfirmation by rememberSaveable { mutableStateOf(false) }
     var pendingMode by rememberSaveable { mutableStateOf(AppMode.EDIT) }
+    var pendingLeaveTarget by rememberSaveable { mutableStateOf<PdfLeaveTarget?>(null) }
+    var saveLeaveTarget by rememberSaveable { mutableStateOf<PdfLeaveTarget?>(null) }
+    var fullscreen by rememberSaveable { mutableStateOf(false) }
+    var showInsertTextDialog by rememberSaveable { mutableStateOf(false) }
+    var insertTextValue by rememberSaveable { mutableStateOf("") }
 
     fun openEbookReader() {
         context.startActivity(Intent(context, EbookActivity::class.java))
@@ -169,13 +176,63 @@ fun InspectorScreen(
     val openLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri -> uri?.let { viewModel.open(context, it, pendingMode) } }
+
+    fun executeLeave(target: PdfLeaveTarget) {
+        when (target) {
+            PdfLeaveTarget.CLOSE_DOCUMENT -> {
+                fullscreen = false
+                viewModel.closeDocument()
+            }
+            PdfLeaveTarget.OPEN_EDIT_DOCUMENT -> {
+                pendingMode = AppMode.EDIT
+                openLauncher.launch(arrayOf("application/pdf"))
+            }
+            PdfLeaveTarget.OPEN_READ_DOCUMENT -> {
+                pendingMode = AppMode.READ
+                openLauncher.launch(arrayOf("application/pdf"))
+            }
+        }
+    }
+
+    fun requestLeave(target: PdfLeaveTarget) {
+        if (state.busy != null) return
+        when (val decision = decidePdfLeave(state.dirty, target)) {
+            is PdfLeaveDecision.Proceed -> executeLeave(decision.target)
+            is PdfLeaveDecision.Confirm -> pendingLeaveTarget = decision.target
+        }
+    }
+
     val saveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/pdf"),
-    ) { uri -> uri?.let { viewModel.saveCopy(context, it) } }
+    ) { uri ->
+        val target = saveLeaveTarget
+        saveLeaveTarget = null
+        if (uri != null) {
+            viewModel.saveCopy(context, uri) { saved ->
+                if (target != null) {
+                    when (val decision = resolvePdfLeaveSave(target, saved)) {
+                        is PdfLeaveDecision.Proceed -> {
+                            pendingLeaveTarget = null
+                            executeLeave(decision.target)
+                        }
+                        is PdfLeaveDecision.Confirm -> pendingLeaveTarget = decision.target
+                    }
+                }
+            }
+        }
+    }
+    val imageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri -> uri?.let { viewModel.insertImage(context, it) } }
 
     fun pickPdf(mode: AppMode) {
-        pendingMode = mode
-        openLauncher.launch(arrayOf("application/pdf"))
+        requestLeave(
+            if (mode == AppMode.EDIT) {
+                PdfLeaveTarget.OPEN_EDIT_DOCUMENT
+            } else {
+                PdfLeaveTarget.OPEN_READ_DOCUMENT
+            },
+        )
     }
 
     val configuration = LocalConfiguration.current
@@ -213,7 +270,6 @@ fun InspectorScreen(
         }
     }
 
-    var fullscreen by rememberSaveable { mutableStateOf(false) }
     var fitMode by remember { mutableStateOf(FitMode.WIDTH) }
     LaunchedEffect(state.documentToken) { fitMode = FitMode.WIDTH }
 
@@ -248,7 +304,7 @@ fun InspectorScreen(
         if (fullscreen) {
             fullscreen = false
         } else {
-            viewModel.closeDocument()
+            requestLeave(PdfLeaveTarget.CLOSE_DOCUMENT)
         }
     }
 
@@ -256,11 +312,6 @@ fun InspectorScreen(
     BackHandler(enabled = !showSettings && !state.hasDocument) {
         showExitConfirmation = true
     }
-
-    val copyText = state.page
-        ?.let { findNode(it.root, state.selectedId) }
-        ?.takeIf { it.kind == NodeKind.TEXT }
-        ?.text
 
     if (showSettings) {
         SettingsScreen(
@@ -276,7 +327,7 @@ fun InspectorScreen(
                 onToggleFullscreen = { fullscreen = !fullscreen },
                 onClose = {
                     fullscreen = false
-                    viewModel.closeDocument()
+                    requestLeave(PdfLeaveTarget.CLOSE_DOCUMENT)
                 },
                 onOpen = { pickPdf(AppMode.READ) },
                 onSettings = {
@@ -298,8 +349,16 @@ fun InspectorScreen(
                         dirty = state.dirty,
                         canUndo = state.canUndo,
                         canRedo = state.canRedo,
-                        copyText = copyText,
-                        onCopyText = { viewModel.copySelectedText(context) },
+                        canCopy = state.selectedIds.size == 1,
+                        onCopyElement = { viewModel.copySelectedElement(context) },
+                        canPasteElement = state.hasElementClipboard,
+                        onPasteElement = { viewModel.pasteElement(context) },
+                        onPasteText = { viewModel.pasteText(context) },
+                        onInsertText = {
+                            insertTextValue = ""
+                            showInsertTextDialog = true
+                        },
+                        onInsertImage = { imageLauncher.launch(arrayOf("image/*")) },
                         onFitWidth = { fitMode = FitMode.WIDTH },
                         onFitHeight = { fitMode = FitMode.HEIGHT },
                         onToggleFullscreen = { fullscreen = !fullscreen },
@@ -395,12 +454,57 @@ fun InspectorScreen(
         )
     }
 
+    pendingLeaveTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingLeaveTarget = null },
+            title = { Text("保存当前修改？") },
+            text = {
+                Text(
+                    if (target == PdfLeaveTarget.CLOSE_DOCUMENT) {
+                        "当前 PDF 有尚未保存的修改，关闭前可以先保存副本。"
+                    } else {
+                        "当前 PDF 有尚未保存的修改，打开其他文件前可以先保存副本。"
+                    },
+                )
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { pendingLeaveTarget = null }) {
+                        Text("取消")
+                    }
+                    TextButton(
+                        onClick = {
+                            pendingLeaveTarget = null
+                            executeLeave(target)
+                        },
+                    ) {
+                        Text("不保存")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        saveLeaveTarget = target
+                        saveLauncher.launch("已编辑.pdf")
+                    },
+                ) {
+                    Text("保存副本")
+                }
+            },
+        )
+    }
+
     if (showDeleteConfirmation) {
-        val selectedLabel = state.page
-            ?.let { findNode(it.root, state.selectedId) }
-            ?.label
-            ?.takeIf { it.isNotBlank() }
-            ?: "当前元素"
+        val selectedLabel = if (state.selectedIds.size > 1) {
+            "${state.selectedIds.size} 个元素"
+        } else {
+            state.page
+                ?.let { findNode(it.root, state.selectedId) }
+                ?.label
+                ?.takeIf { it.isNotBlank() }
+                ?: "当前元素"
+        }
         AlertDialog(
             onDismissRequest = { showDeleteConfirmation = false },
             title = { Text("删除元素？") },
@@ -415,6 +519,36 @@ fun InspectorScreen(
                         viewModel.deleteSelected(context)
                     },
                 ) { Text("删除") }
+            },
+        )
+    }
+
+    if (showInsertTextDialog) {
+        AlertDialog(
+            onDismissRequest = { showInsertTextDialog = false },
+            title = { Text("插入文本") },
+            text = {
+                OutlinedTextField(
+                    value = insertTextValue,
+                    onValueChange = { insertTextValue = it },
+                    label = { Text("文本内容") },
+                    minLines = 3,
+                    maxLines = 8,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { showInsertTextDialog = false }) { Text("取消") }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = insertTextValue.isNotBlank(),
+                    onClick = {
+                        val text = insertTextValue
+                        showInsertTextDialog = false
+                        viewModel.insertTextAtCenter(context, text)
+                    },
+                ) { Text("插入") }
             },
         )
     }
@@ -460,10 +594,26 @@ private fun Workspace(
                 .toList()
         }
     }
-    val selectedRect = remember(page, transform, state.selectedId) {
-        val node = findNode(page.root, state.selectedId)
-        val bounds = node?.bounds
-        if (bounds != null && transform != null) transform.toRect(bounds) else null
+    val selectedRects = remember(page, transform, state.selectedIds) {
+        if (transform == null) emptyList() else state.selectedIds.mapNotNull { id ->
+            findNode(page.root, id)?.bounds?.let(transform::toRect)
+        }
+    }
+    val selectedRect = selectedRects.singleOrNull()
+    val selectionOverlayRect = selectedRects.takeIf { it.isNotEmpty() }?.let { rects ->
+        Rect(
+            left = rects.minOf { it.left },
+            top = rects.minOf { it.top },
+            right = rects.maxOf { it.right },
+            bottom = rects.maxOf { it.bottom },
+        )
+    }
+    val selectedCanTransform = remember(page, state.selectedIds) {
+        if (state.selectedIds.size == 1) {
+            state.selectedId?.let(viewModel::canTransform) == true
+        } else {
+            viewModel.canTransformSelection()
+        }
     }
 
     val highlight = MaterialTheme.colorScheme.primary
@@ -509,7 +659,7 @@ private fun Workspace(
                     scaleState = scaleState,
                     offsetState = offsetState,
                     leaves = leafRects,
-                    selectedRect = selectedRect,
+                    selectedRects = if (selectedCanTransform && editingRunId == null) emptyList() else selectedRects,
                     highlightColor = highlight,
                     backdropColor = backdrop,
                     runBoxes = runBoxes,
@@ -520,12 +670,48 @@ private fun Workspace(
                     fitMode = fitMode,
                     onUserTransform = onUserTransform,
                     onSelect = { id -> viewModel.select(id, reveal = true) },
+                    onToggleSelect = { id -> viewModel.toggleSelection(id, reveal = true) },
                     renderTile = { idx, src, outW, outH ->
                         viewModel.renderRegion(idx, src.left, src.top, src.right, src.bottom, outW, outH)
                             ?.asImageBitmap()
                     },
                     modifier = Modifier.fillMaxSize(),
                 )
+                val selectedId = state.selectedId
+                if (
+                    selectedId != null && selectionOverlayRect != null && transform != null &&
+                    selectedCanTransform && editingRunId == null
+                ) {
+                    ObjectTransformOverlay(
+                        objectId = state.selectedIds.hashCode(),
+                        rect = selectionOverlayRect,
+                        canvasScale = scaleState.value,
+                        canvasOffset = offsetState.value,
+                        color = highlight,
+                        enabled = state.busy == null,
+                        onCommit = { translationBitmap, scale, screenRotation ->
+                            val userDelta = transform.toUserDelta(translationBitmap)
+                            if (state.selectedIds.size == 1) {
+                                viewModel.applyCanvasTransform(
+                                    context = context,
+                                    id = selectedId,
+                                    dx = userDelta.x,
+                                    dy = userDelta.y,
+                                    scale = scale,
+                                    rotationDegrees = transform.toUserRotation(screenRotation),
+                                )
+                            } else {
+                                viewModel.applyCanvasTransformSelection(
+                                    context = context,
+                                    dx = userDelta.x,
+                                    dy = userDelta.y,
+                                    scale = scale,
+                                    rotationDegrees = transform.toUserRotation(screenRotation),
+                                )
+                            }
+                        },
+                    )
+                }
                 val er = editingRunId
                 val run = if (er != null && transform != null) findNode(page.root, er) else null
                 val rect = run?.bounds?.let { transform?.toRect(it) }
@@ -566,20 +752,24 @@ private fun Workspace(
             page = page,
             expanded = state.expanded,
             selectedId = state.selectedId,
+            selectedIds = state.selectedIds,
             swatchColors = state.swatchColors,
             revealTick = state.revealTick,
             showRaw = state.showRaw,
-            canDelete = state.selectedId != null,
+            canDelete = state.selectedIds.isNotEmpty(),
             dock = dock,
             transparent = transparent,
             canDockSide = canDockSide,
             onSelect = { id -> viewModel.select(id) },
+            onToggleSelect = { id -> viewModel.toggleSelection(id, reveal = true) },
             onToggleExpand = { id -> viewModel.toggleExpand(id) },
             onToggleRaw = { viewModel.toggleRaw() },
             onToggleDock = onToggleDock,
             onToggleTransparent = onToggleTransparent,
             onDelete = onDelete,
             onEdit = { id -> viewModel.beginEdit(id) },
+            onAlign = { action -> viewModel.alignSelected(context, action) },
+            onReorder = { action -> viewModel.reorderSelected(context, action) },
         )
     }
 
@@ -774,11 +964,20 @@ private fun HomeScreen(
                                 shape = MaterialTheme.shapes.medium,
                                 color = MaterialTheme.colorScheme.errorContainer,
                             ) {
-                                Text(
-                                    error,
-                                    modifier = Modifier.padding(16.dp),
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                )
+                                Row(
+                                    modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        error,
+                                        modifier = Modifier.weight(1f),
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    TextButton(onClick = onOpenRead) {
+                                        Text("选择文件")
+                                    }
+                                }
                             }
                         }
                     }

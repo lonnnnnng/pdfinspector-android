@@ -1,5 +1,6 @@
 package com.loooong.reader.ui
 
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import com.loooong.reader.engine.Bounds
 
@@ -42,4 +43,19 @@ class PageTransform(
         }
         return Rect(left, top, right, bottom)
     }
+
+    // long: 画布拖动量先去掉渲染缩放，再按页面旋转反算到 PDF 用户空间，保证视觉方向与落盘方向一致。
+    fun toUserDelta(bitmapDelta: Offset): Offset {
+        val dx = bitmapDelta.x / scale
+        val dy = bitmapDelta.y / scale
+        return when (((rotation % 360) + 360) % 360) {
+            90 -> Offset(dy, dx)
+            180 -> Offset(-dx, dy)
+            270 -> Offset(-dy, -dx)
+            else -> Offset(dx, -dy)
+        }
+    }
+
+    // long: 页面映射到屏幕后方向发生镜像，因此屏幕顺时针角度需要反号才能写回 PDF 坐标。
+    fun toUserRotation(screenDegrees: Float): Float = -screenDegrees
 }

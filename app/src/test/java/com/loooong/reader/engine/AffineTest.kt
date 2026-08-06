@@ -38,6 +38,16 @@ class AffineTest {
     }
 
     @Test
+    fun rotateAboutKeepsCenterAndTurnsPointCounterClockwise() {
+        val transform = Affine.rotateAbout(90f, 50f, 60f)
+
+        assertEquals(50f, transform.mapX(50f, 60f), 1e-3f)
+        assertEquals(60f, transform.mapY(50f, 60f), 1e-3f)
+        assertEquals(50f, transform.mapX(60f, 60f), 1e-3f)
+        assertEquals(70f, transform.mapY(60f, 60f), 1e-3f)
+    }
+
+    @Test
     fun degenerateInverseIsNull() {
         assertNull(Affine(0f, 0f, 0f, 0f, 5f, 5f).inverse())
     }

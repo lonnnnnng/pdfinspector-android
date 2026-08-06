@@ -69,6 +69,15 @@ class FontCatalog(private val appContext: Context) {
         }
     }
 
+    // long: 新增文本没有原字体可供匹配，按实际字符逐个尝试字体，优先复用已缓存字体并覆盖中文等非拉丁字符。
+    fun resolveForText(doc: PDDocument, text: String): PDFont? {
+        for (option in options()) {
+            val font = resolve(doc, option.id) ?: continue
+            if (runCatching { text.split('\n').forEach { line -> font.encode(line) } }.isSuccess) return font
+        }
+        return null
+    }
+
     // Best catalog face for the original font. Exact metric-compatible name
     // aliases (Arial, Times, Courier, Calibri, Cambria) and an exact system
     // font by family are confident; Panose and flag bucketing are not.

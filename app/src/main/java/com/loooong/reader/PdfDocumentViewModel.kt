@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
@@ -22,21 +23,29 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tom_roush.pdfbox.contentstream.operator.Operator
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.font.PDFont
 import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineNode
 import com.tom_roush.pdfbox.rendering.PDFRenderer
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.loooong.reader.engine.ContentStreamEngine
+import com.loooong.reader.engine.Bounds
+import com.loooong.reader.engine.AlignmentAction
 import com.loooong.reader.engine.DrawNode
 import com.loooong.reader.engine.EditCaps
 import com.loooong.reader.engine.EditRequest
 import com.loooong.reader.engine.EditResult
 import com.loooong.reader.engine.ElementEditor
+import com.loooong.reader.engine.ElementAlignment
+import com.loooong.reader.engine.ImageInsertRequest
 import com.loooong.reader.engine.NodeKind
+import com.loooong.reader.engine.LayerAction
 import com.loooong.reader.engine.PageEditSnapshot
+import com.tom_roush.pdfbox.pdmodel.PDResources
 import com.loooong.reader.engine.ParsedPage
 import com.loooong.reader.engine.StreamOwner
+import com.loooong.reader.engine.TextInsertRequest
 import com.loooong.reader.engine.collectGroupIds
 import com.loooong.reader.engine.findNode
 import com.loooong.reader.ui.PageTransform
@@ -84,6 +93,7 @@ class PdfDocumentViewModel : ViewModel() {
     private val undoStack = ArrayDeque<EditSnapshot>()
     private val redoStack = ArrayDeque<EditSnapshot>()
     private var historyBytes = 0L
+    private var elementClipboard: ElementClipboard? = null
 
     fun open(
         context: Context,
@@ -133,6 +143,7 @@ class PdfDocumentViewModel : ViewModel() {
                 }
                 runCatching { previousCacheFile?.delete() }
                 clearHistory()
+                elementClipboard = null
                 clearReaderCaches()
                 fontCatalog = FontCatalog(context.applicationContext)
                 embeddedFonts = false
@@ -188,7 +199,7 @@ class PdfDocumentViewModel : ViewModel() {
     fun switchMode(mode: AppMode) {
         if (!state.hasDocument || state.mode == mode) return
         if (mode == AppMode.READ) {
-            state = state.copy(mode = AppMode.READ, selectedId = null, editingId = null)
+            state = state.copy(mode = AppMode.READ, selectedId = null, selectedIds = emptySet(), editingId = null)
             ensureReaderPage(state.pageIndex, DEFAULT_READER_WIDTH_PX)
             return
         }
@@ -394,16 +405,172 @@ class PdfDocumentViewModel : ViewModel() {
     fun select(id: Int?, reveal: Boolean = false) {
         state = state.copy(
             selectedId = id,
+            selectedIds = id?.let(::setOf) ?: emptySet(),
+            editingId = null,
             revealTick = if (reveal) state.revealTick + 1 else state.revealTick,
         )
     }
 
-    fun copySelectedText(context: Context) {
-        val node = findNode(parsed?.root ?: return, state.selectedId) ?: return
-        val text = node.text ?: return
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("PDF 文本", text))
-        Toast.makeText(context, "已复制文本", Toast.LENGTH_SHORT).show()
+    /** long: 长按只在页面级叶子对象之间切换多选，文本 run 和分组继续保留原有编辑语义。 */
+    fun toggleSelection(id: Int, reveal: Boolean = false) {
+        val page = parsed ?: return
+        if (page.leaves.none { it.id == id }) return
+        val next = state.selectedIds.toMutableSet().apply {
+            if (!add(id)) remove(id)
+        }
+        state = state.copy(
+            selectedIds = next,
+            selectedId = when {
+                id in next -> id
+                next.isEmpty() -> null
+                else -> next.last()
+            },
+            editingId = null,
+            revealTick = if (reveal) state.revealTick + 1 else state.revealTick,
+        )
+    }
+
+    /** long: 将当前选中元素保存到应用内剪贴板，同时给文本保留系统剪贴板兼容性。 */
+    fun copySelectedElement(context: Context) {
+        if (state.selectedIds.size > 1) {
+            Toast.makeText(context, "复制前请只选择一个元素", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val page = parsed ?: return
+        val node = findNode(page.root, state.selectedId) ?: return
+        if (node.stream?.owner !is StreamOwner.Page) {
+            Toast.makeText(context, "共享表单对象暂不支持复制", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val bounds = node.bounds ?: run {
+            Toast.makeText(context, "当前元素没有可复制的范围", Toast.LENGTH_SHORT).show()
+            return
+        }
+        when (node.kind) {
+            NodeKind.TEXT -> {
+                val text = node.text.orEmpty()
+                if (text.isBlank()) return
+                elementClipboard = ElementClipboard.Text(
+                    text = text,
+                    fontSize = node.fontSize.coerceAtLeast(12f),
+                    fillArgb = node.colorArgb ?: 0xFF202124.toInt(),
+                    bounds = bounds.copyBounds(),
+                    sourcePageIndex = state.pageIndex,
+                )
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("PDF 文本", text))
+            }
+            NodeKind.PATH, NodeKind.IMAGE -> {
+                val stream = node.stream ?: return
+                val copied = stream.tokens.subList(node.startIndex, node.endIndex + 1).toList()
+                elementClipboard = ElementClipboard.Raw(
+                    kind = node.kind,
+                    tokens = copied,
+                    sourceResources = stream.resources,
+                    bounds = bounds.copyBounds(),
+                    sourcePageIndex = state.pageIndex,
+                )
+            }
+            NodeKind.GROUP -> {
+                Toast.makeText(context, "请选择具体元素后再复制", Toast.LENGTH_SHORT).show()
+                return
+            }
+        }
+        state = state.copy(hasElementClipboard = true)
+        Toast.makeText(context, "已复制元素，可粘贴到当前 PDF", Toast.LENGTH_SHORT).show()
+    }
+
+    /** long: 粘贴内部元素剪贴板；没有内部对象时仍允许通过已有文本入口粘贴。 */
+    fun pasteElement(context: Context) {
+        val clip = elementClipboard
+        if (clip == null) {
+            pasteText(context)
+            return
+        }
+        val doc = document ?: return
+        val parsedPage = parsed ?: return
+        val pageIndex = state.pageIndex
+        viewModelScope.launch {
+            var mutationApplied = false
+            try {
+                state = state.copy(busy = "正在粘贴元素", error = null)
+                val execution = withContext(Dispatchers.IO) {
+                    readerDataMutex.withLock {
+                        val page = doc.getPage(pageIndex)
+                        val before = ElementEditor.snapshot(page)
+                        val crop = page.cropBox
+                        val result = when (clip) {
+                            is ElementClipboard.Text -> {
+                                val catalog = fontCatalog ?: error("字体目录未就绪")
+                                val font = catalog.resolveForText(doc, clip.text)
+                                    ?: error("没有可编码此文本的字体")
+                                val x = if (clip.sourcePageIndex == pageIndex) {
+                                    clip.bounds.minX + 24f
+                                } else {
+                                    crop.lowerLeftX + (crop.width - clip.bounds.width) / 2f
+                                }
+                                val y = if (clip.sourcePageIndex == pageIndex) {
+                                    clip.bounds.minY + 24f
+                                } else {
+                                    crop.lowerLeftY + crop.height / 2f
+                                }
+                                ElementEditor.insertText(
+                                    doc,
+                                    page,
+                                    parsedPage.tokens,
+                                    TextInsertRequest(
+                                        text = clip.text,
+                                        x = x,
+                                        y = y,
+                                        fontSize = clip.fontSize,
+                                        font = font,
+                                        fillArgb = clip.fillArgb,
+                                    ),
+                                )
+                            }
+                            is ElementClipboard.Raw -> {
+                                val dx = if (clip.sourcePageIndex == pageIndex) 24f
+                                else crop.lowerLeftX + crop.width / 2f - (clip.bounds.minX + clip.bounds.maxX) / 2f
+                                val dy = if (clip.sourcePageIndex == pageIndex) 24f
+                                else crop.lowerLeftY + crop.height / 2f - (clip.bounds.minY + clip.bounds.maxY) / 2f
+                                ElementEditor.pasteNode(
+                                    doc,
+                                    page,
+                                    parsedPage.tokens,
+                                    clip.tokens,
+                                    clip.sourceResources,
+                                    dx,
+                                    dy,
+                                )
+                            }
+                        }
+                        PasteExecution(result, before, clip is ElementClipboard.Text)
+                    }
+                }
+                when (execution.result) {
+                    is EditResult.Applied -> {
+                        pushUndo(pageIndex, execution.before)
+                        if (execution.embeddedFont) embeddedFonts = true
+                        mutationApplied = true
+                        state = state.copy(dirty = true, canUndo = true, canRedo = false)
+                        resyncCacheAndReopen()
+                        renderPage(pageIndex)
+                    }
+                    else -> Toast.makeText(context, "无法粘贴此元素", Toast.LENGTH_SHORT).show()
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "paste failed", t)
+                state = state.copy(
+                    error = "粘贴元素失败",
+                    dirty = state.dirty || mutationApplied,
+                    canUndo = undoStack.isNotEmpty(),
+                    canRedo = redoStack.isNotEmpty(),
+                )
+                Toast.makeText(context, "粘贴元素失败", Toast.LENGTH_LONG).show()
+            } finally {
+                state = state.copy(busy = null)
+            }
+        }
     }
 
     fun toggleExpand(id: Int) {
@@ -418,22 +585,34 @@ class PdfDocumentViewModel : ViewModel() {
     fun deleteSelected(context: Context) {
         val doc = document ?: return
         val parsedPage = parsed ?: return
-        val node = findNode(parsedPage.root, state.selectedId) ?: return
+        val nodes = state.selectedIds.mapNotNull { findNode(parsedPage.root, it) }
+            .ifEmpty { listOfNotNull(findNode(parsedPage.root, state.selectedId)) }
+        if (nodes.isEmpty()) return
         val pageIndex = state.pageIndex
-        val editsSharedForm = node.stream?.owner is StreamOwner.Form
+        val batch = nodes.size > 1
+        if (batch && nodes.any { it.stream?.owner !is StreamOwner.Page || it.kind == NodeKind.GROUP }) {
+            Toast.makeText(context, "多选删除仅支持页面级文本、路径和图片", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val editsSharedForm = !batch && nodes.single().stream?.owner is StreamOwner.Form
         viewModelScope.launch {
             state = state.copy(busy = "正在删除")
             var mutationApplied = false
             try {
                 val before = withContext(Dispatchers.IO) {
                     val page = doc.getPage(pageIndex)
-                    val snapshot = ElementEditor.snapshot(
-                        requireNotNull(node.stream) { "Element has no content-stream owner" },
-                    )
-                    ElementEditor.deleteNode(doc, page, node)
+                    val stream = requireNotNull(nodes.first().stream) { "Element has no content-stream owner" }
+                    val snapshot = ElementEditor.snapshot(stream)
+                    if (batch) {
+                        check(ElementEditor.deleteNodes(doc, page, nodes) is EditResult.Applied) {
+                            "无法批量删除所选元素"
+                        }
+                    } else {
+                        ElementEditor.deleteNode(doc, page, nodes.single())
+                    }
                     snapshot
                 }
-                // 只有删除成功后才登记撤销记录，避免失败操作污染历史栈。
+                // long: 一批元素共用同一内容流快照，所以整次删除只登记一条撤销记录。
                 pushUndo(pageIndex, before)
                 mutationApplied = true
                 state = state.copy(dirty = true, canUndo = true, canRedo = false)
@@ -461,7 +640,7 @@ class PdfDocumentViewModel : ViewModel() {
     }
 
     fun beginEdit(id: Int) {
-        state = state.copy(selectedId = id, editingId = id)
+        state = state.copy(selectedId = id, selectedIds = setOf(id), editingId = id)
     }
 
     fun cancelEdit() {
@@ -493,6 +672,360 @@ class PdfDocumentViewModel : ViewModel() {
     fun applyEdit(context: Context, request: EditRequest) {
         val node = findNode(parsed?.root ?: return, state.editingId) ?: return
         applyEditInternal(context, node, request)
+    }
+
+    fun insertTextAtCenter(context: Context, text: String) {
+        val doc = document ?: return
+        val parsedPage = parsed ?: return
+        if (text.isBlank()) return
+        val pageIndex = state.pageIndex
+        viewModelScope.launch {
+            var mutationApplied = false
+            try {
+                state = state.copy(busy = "正在插入文本", error = null)
+                val execution = withContext(Dispatchers.IO) {
+                    readerDataMutex.withLock {
+                        val page = doc.getPage(pageIndex)
+                        val box = page.cropBox
+                        val catalog = fontCatalog ?: error("字体目录未就绪")
+                        val font = catalog.resolveForText(doc, text) ?: error("没有可编码此文本的字体")
+                        val before = ElementEditor.snapshot(page)
+                        val request = TextInsertRequest(
+                            text = text,
+                            x = box.lowerLeftX + box.width / 2f,
+                            y = box.lowerLeftY + box.height / 2f,
+                            fontSize = 18f,
+                            font = font,
+                            fillArgb = 0xFF202124.toInt(),
+                        )
+                        ElementEditor.insertText(doc, page, parsedPage.tokens, request) to before
+                    }
+                }
+                when (val result = execution.first) {
+                    is EditResult.Applied -> {
+                        pushUndo(pageIndex, execution.second)
+                        embeddedFonts = true
+                        mutationApplied = true
+                        state = state.copy(dirty = true, canUndo = true, canRedo = false)
+                        resyncCacheAndReopen()
+                        renderPage(pageIndex)
+                    }
+                    is EditResult.TextEncodeFailed ->
+                        Toast.makeText(context, "默认字体无法编码此文本，请先导入字体", Toast.LENGTH_LONG).show()
+                    EditResult.NoChange -> Unit
+                    EditResult.Degenerate ->
+                        Toast.makeText(context, "无法插入文本", Toast.LENGTH_SHORT).show()
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "insert text failed", t)
+                state = state.copy(
+                    error = "插入文本失败",
+                    dirty = state.dirty || mutationApplied,
+                    canUndo = undoStack.isNotEmpty(),
+                    canRedo = redoStack.isNotEmpty(),
+                )
+                Toast.makeText(context, "插入文本失败", Toast.LENGTH_LONG).show()
+            } finally {
+                state = state.copy(busy = null)
+            }
+        }
+    }
+
+    fun pasteText(context: Context) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val text = clipboard?.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+        if (text.isBlank()) {
+            Toast.makeText(context, "剪贴板中没有文本", Toast.LENGTH_SHORT).show()
+        } else {
+            insertTextAtCenter(context, text)
+        }
+    }
+
+    fun insertImage(context: Context, uri: Uri) {
+        val doc = document ?: return
+        val parsedPage = parsed ?: return
+        val pageIndex = state.pageIndex
+        viewModelScope.launch {
+            var mutationApplied = false
+            try {
+                state = state.copy(busy = "正在插入图片", error = null)
+                val execution = withContext(Dispatchers.IO) {
+                    readerDataMutex.withLock {
+                        val bytes = context.contentResolver.openInputStream(uri).use { input ->
+                            requireNotNull(input) { "无法读取图片" }.readBytes()
+                        }
+                        val page = doc.getPage(pageIndex)
+                        val box = page.cropBox
+                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                        val sourceW = bounds.outWidth.takeIf { it > 0 } ?: 1
+                        val sourceH = bounds.outHeight.takeIf { it > 0 } ?: 1
+                        val maxW = (box.width * 0.55f).coerceAtLeast(72f)
+                        val maxH = (box.height * 0.45f).coerceAtLeast(72f)
+                        val factor = minOf(maxW / sourceW, maxH / sourceH)
+                        val width = (sourceW * factor).coerceAtLeast(24f)
+                        val height = (sourceH * factor).coerceAtLeast(24f)
+                        val before = ElementEditor.snapshot(page)
+                        val request = ImageInsertRequest(
+                            bytes = bytes,
+                            x = box.lowerLeftX + (box.width - width) / 2f,
+                            y = box.lowerLeftY + (box.height - height) / 2f,
+                            width = width,
+                            height = height,
+                        )
+                        ElementEditor.insertImage(doc, page, parsedPage.tokens, request) to before
+                    }
+                }
+                when (execution.first) {
+                    is EditResult.Applied -> {
+                        pushUndo(pageIndex, execution.second)
+                        mutationApplied = true
+                        state = state.copy(dirty = true, canUndo = true, canRedo = false)
+                        resyncCacheAndReopen()
+                        renderPage(pageIndex)
+                    }
+                    else -> Toast.makeText(context, "无法插入此图片", Toast.LENGTH_SHORT).show()
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "insert image failed", t)
+                state = state.copy(
+                    error = "插入图片失败",
+                    dirty = state.dirty || mutationApplied,
+                    canUndo = undoStack.isNotEmpty(),
+                    canRedo = redoStack.isNotEmpty(),
+                )
+                Toast.makeText(context, "插入图片失败", Toast.LENGTH_LONG).show()
+            } finally {
+                state = state.copy(busy = null)
+            }
+        }
+    }
+
+    fun canTransform(id: Int): Boolean {
+        val parsedPage = parsed ?: return false
+        val node = findNode(parsedPage.root, id) ?: return false
+        val tokens = node.stream?.tokens ?: parsedPage.tokens
+        return ElementEditor.capabilities(tokens, node).canGeom
+    }
+
+    fun canTransformSelection(): Boolean {
+        val page = parsed ?: return false
+        val nodes = state.selectedIds.mapNotNull { findNode(page.root, it) }
+        if (nodes.isEmpty() || nodes.size != state.selectedIds.size) return false
+        val stream = nodes.first().stream ?: return false
+        if (stream.owner !is StreamOwner.Page || nodes.any { it.stream !== stream }) return false
+        return nodes.all { node ->
+            ElementEditor.capabilities(stream.tokens, node).canGeom
+        }
+    }
+
+    /** long: 多选变换围绕联合外接框中心执行，整次手势只写流并登记一条撤销记录。 */
+    fun applyCanvasTransformSelection(
+        context: Context,
+        dx: Float,
+        dy: Float,
+        scale: Float,
+        rotationDegrees: Float,
+    ) {
+        if (!canTransformSelection()) return
+        val doc = document ?: return
+        val pageState = parsed ?: return
+        val nodes = state.selectedIds.mapNotNull { findNode(pageState.root, it) }
+        val union = Bounds.empty()
+        nodes.forEach { it.bounds?.let(union::includeBounds) }
+        if (!union.isValid || scale <= 0f) return
+        if (!dx.isFinite() || !dy.isFinite() || !scale.isFinite() || !rotationDegrees.isFinite()) return
+        if (dx == 0f && dy == 0f && scale == 1f && rotationDegrees == 0f) return
+        val edits = nodes.map { node ->
+            node to EditRequest(
+                dx = dx,
+                dy = dy,
+                scaleX = scale,
+                scaleY = scale,
+                rotationDegrees = rotationDegrees,
+                pivotX = (union.minX + union.maxX) / 2f,
+                pivotY = (union.minY + union.maxY) / 2f,
+            )
+        }
+        val pageIndex = state.pageIndex
+        viewModelScope.launch {
+            var mutationApplied = false
+            try {
+                state = state.copy(busy = "正在变换元素", error = null)
+                val before = withContext(Dispatchers.IO) {
+                    readerDataMutex.withLock {
+                        val page = doc.getPage(pageIndex)
+                        val snapshot = ElementEditor.snapshot(page)
+                        check(ElementEditor.editElements(doc, page, edits) is EditResult.Applied) {
+                            "无法批量变换所选元素"
+                        }
+                        snapshot
+                    }
+                }
+                pushUndo(pageIndex, before)
+                mutationApplied = true
+                state = state.copy(dirty = true, canUndo = true, canRedo = false)
+                resyncCacheAndReopen()
+                renderPage(pageIndex)
+            } catch (t: Throwable) {
+                Log.e(TAG, "multi transform failed", t)
+                state = state.copy(
+                    error = "变换元素失败",
+                    dirty = state.dirty || mutationApplied,
+                    canUndo = undoStack.isNotEmpty(),
+                    canRedo = redoStack.isNotEmpty(),
+                )
+            } finally {
+                state = state.copy(busy = null)
+            }
+        }
+    }
+
+    fun alignSelected(context: Context, action: AlignmentAction) {
+        val doc = document ?: return
+        val parsedPage = parsed ?: return
+        val nodes = state.selectedIds.mapNotNull { findNode(parsedPage.root, it) }
+        val minimum = if (
+            action == AlignmentAction.DISTRIBUTE_HORIZONTAL ||
+            action == AlignmentAction.DISTRIBUTE_VERTICAL
+        ) 3 else 2
+        if (nodes.size < minimum) {
+            Toast.makeText(context, if (minimum == 3) "至少选择 3 个元素" else "至少选择 2 个元素", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (nodes.any { node ->
+                node.stream?.owner !is StreamOwner.Page ||
+                    !ElementEditor.capabilities(node.stream?.tokens.orEmpty(), node).canGeom
+            }
+        ) {
+            Toast.makeText(context, "所选内容包含无法对齐的元素", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val translations = ElementAlignment.compute(nodes, action)
+        if (translations.isEmpty()) {
+            Toast.makeText(context, "所选元素已经满足此布局", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val byId = nodes.associateBy { it.id }
+        val edits = translations.mapNotNull { move ->
+            byId[move.id]?.let { node -> node to EditRequest(dx = move.dx, dy = move.dy) }
+        }
+        val pageIndex = state.pageIndex
+        viewModelScope.launch {
+            var mutationApplied = false
+            try {
+                state = state.copy(busy = "正在对齐元素", error = null)
+                val before = withContext(Dispatchers.IO) {
+                    readerDataMutex.withLock {
+                        val page = doc.getPage(pageIndex)
+                        val snapshot = ElementEditor.snapshot(page)
+                        check(ElementEditor.editElements(doc, page, edits) is EditResult.Applied) {
+                            "无法批量对齐所选元素"
+                        }
+                        snapshot
+                    }
+                }
+                pushUndo(pageIndex, before)
+                mutationApplied = true
+                state = state.copy(dirty = true, canUndo = true, canRedo = false)
+                resyncCacheAndReopen()
+                renderPage(pageIndex)
+            } catch (t: Throwable) {
+                Log.e(TAG, "align failed", t)
+                state = state.copy(
+                    error = "对齐元素失败",
+                    dirty = state.dirty || mutationApplied,
+                    canUndo = undoStack.isNotEmpty(),
+                    canRedo = redoStack.isNotEmpty(),
+                )
+            } finally {
+                state = state.copy(busy = null)
+            }
+        }
+    }
+
+    fun reorderSelected(context: Context, action: LayerAction) {
+        val doc = document ?: return
+        val parsedPage = parsed ?: return
+        if (state.selectedIds.size != 1) return
+        val id = state.selectedIds.single()
+        val target = findSafeLayerMove(parsedPage.root, id, action)
+        if (target == null) {
+            Toast.makeText(context, "此元素依赖外部绘制状态，暂不能调整图层", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val pageIndex = state.pageIndex
+        viewModelScope.launch {
+            var mutationApplied = false
+            try {
+                state = state.copy(busy = "正在调整图层", error = null)
+                val before = withContext(Dispatchers.IO) {
+                    readerDataMutex.withLock {
+                        val page = doc.getPage(pageIndex)
+                        val snapshot = ElementEditor.snapshot(target.stream)
+                        check(
+                            ElementEditor.reorderRange(
+                                doc,
+                                page,
+                                target.stream,
+                                target.start,
+                                target.end,
+                                target.insertAt,
+                            ) is EditResult.Applied,
+                        ) { "图层位置没有变化" }
+                        snapshot
+                    }
+                }
+                pushUndo(pageIndex, before)
+                mutationApplied = true
+                state = state.copy(dirty = true, canUndo = true, canRedo = false)
+                resyncCacheAndReopen()
+                renderPage(pageIndex)
+            } catch (t: Throwable) {
+                Log.e(TAG, "reorder failed", t)
+                state = state.copy(
+                    error = "调整图层失败",
+                    dirty = state.dirty || mutationApplied,
+                    canUndo = undoStack.isNotEmpty(),
+                    canRedo = redoStack.isNotEmpty(),
+                )
+            } finally {
+                state = state.copy(busy = null)
+            }
+        }
+    }
+
+    fun applyCanvasTransform(
+        context: Context,
+        id: Int,
+        dx: Float,
+        dy: Float,
+        scale: Float,
+        rotationDegrees: Float,
+    ) {
+        val node = findNode(parsed?.root ?: return, id) ?: return
+        val bounds = node.bounds ?: return
+        if (!dx.isFinite() || !dy.isFinite() || !scale.isFinite() || !rotationDegrees.isFinite()) return
+        if (scale <= 0f) return
+        if (!canTransform(id)) return
+        if (dx == 0f && dy == 0f && scale == 1f && rotationDegrees == 0f) return
+        if (node.stream?.owner is StreamOwner.Form) {
+            Toast.makeText(context, "此操作会更新表单对象的所有引用位置", Toast.LENGTH_SHORT).show()
+        }
+        // long: 每次画布手势只在抬手时提交一次，确保一次移动、缩放或旋转只产生一条撤销记录。
+        applyEditInternal(
+            context,
+            node,
+            EditRequest(
+                dx = dx,
+                dy = dy,
+                scaleX = scale,
+                scaleY = scale,
+                rotationDegrees = rotationDegrees,
+                pivotX = (bounds.minX + bounds.maxX) / 2f,
+                pivotY = (bounds.minY + bounds.maxY) / 2f,
+            ),
+        )
     }
 
     // Inline canvas editing: retype one text run in place. Always routes through
@@ -696,21 +1229,35 @@ class PdfDocumentViewModel : ViewModel() {
         historyBytes = 0
     }
 
-    fun saveCopy(context: Context, uri: Uri) {
-        val doc = document ?: return
+    fun saveCopy(context: Context, uri: Uri, onComplete: (Boolean) -> Unit = {}) {
+        val doc = document ?: run {
+            onComplete(false)
+            return
+        }
         viewModelScope.launch {
-            state = state.copy(busy = "正在保存")
+            var saved = false
+            state = state.copy(busy = "正在保存", error = null)
             try {
                 withContext(Dispatchers.IO) {
-                    PdfDocumentWriter.saveCopy(doc, context.contentResolver.openOutputStream(uri, "wt"))
+                    readerDataMutex.withLock {
+                        val stagingFile = File.createTempFile("pdf-export-", ".pdf", context.cacheDir)
+                        PdfDocumentWriter.saveCopy(
+                            doc,
+                            { context.contentResolver.openOutputStream(uri, "wt") },
+                            stagingFile,
+                        )
+                    }
                 }
                 state = state.copy(dirty = false)
+                saved = true
                 Toast.makeText(context, "副本已保存", Toast.LENGTH_SHORT).show()
             } catch (t: Throwable) {
                 Log.e(TAG, "save failed", t)
+                state = state.copy(error = "保存 PDF 副本失败，请重试")
                 Toast.makeText(context, "保存失败", Toast.LENGTH_LONG).show()
             } finally {
                 state = state.copy(busy = null)
+                runCatching { onComplete(saved) }
             }
         }
     }
@@ -729,6 +1276,7 @@ class PdfDocumentViewModel : ViewModel() {
             }
             parsed = null
             clearHistory()
+            elementClipboard = null
             clearReaderCaches()
             runCatching { cacheFile?.delete() }
             cacheFile = null
@@ -772,6 +1320,7 @@ class PdfDocumentViewModel : ViewModel() {
                 pageTransform = result.third,
                 swatchColors = sampleLeafColors(result.first, result.second.leaves, result.third),
                 selectedId = null,
+                selectedIds = emptySet(),
                 expanded = collectGroupIds(result.second.root),
             )
         } catch (cancelled: CancellationException) {
@@ -1030,6 +1579,83 @@ private data class LoadedDocument(
 
 private class EditSnapshot(val pageIndex: Int, val content: PageEditSnapshot)
 
+private sealed class ElementClipboard {
+    class Text(
+        val text: String,
+        val fontSize: Float,
+        val fillArgb: Int,
+        val bounds: Bounds,
+        val sourcePageIndex: Int,
+    ) : ElementClipboard()
+
+    class Raw(
+        val kind: NodeKind,
+        val tokens: List<Any>,
+        val sourceResources: PDResources?,
+        val bounds: Bounds,
+        val sourcePageIndex: Int,
+    ) : ElementClipboard()
+}
+
+private class PasteExecution(
+    val result: EditResult,
+    val before: PageEditSnapshot,
+    val embeddedFont: Boolean,
+)
+
+private fun Bounds.copyBounds() = Bounds(minX, minY, maxX, maxY)
+
+private class LayerMove(
+    val stream: com.loooong.reader.engine.ParsedStream,
+    val start: Int,
+    val end: Int,
+    val insertAt: Int,
+)
+
+/** long: 仅把单子节点 q/Q 分组视为自包含图层，避免重排后继承到错误的颜色或 CTM。 */
+private fun findSafeLayerMove(root: DrawNode, id: Int, action: LayerAction): LayerMove? {
+    val path = ArrayList<DrawNode>()
+    fun walk(node: DrawNode): Boolean {
+        path.add(node)
+        if (node.id == id) return true
+        for (child in node.children) if (walk(child)) return true
+        path.removeAt(path.lastIndex)
+        return false
+    }
+    if (!walk(root)) return null
+    val selectedIndex = path.lastIndex
+    val selected = path[selectedIndex]
+    val blockIndex = when {
+        selected.kind == NodeKind.GROUP && isSafeLayerBlock(selected) -> selectedIndex
+        selectedIndex > 0 -> {
+            val parent = path[selectedIndex - 1]
+            if (parent.children.size == 1 && isSafeLayerBlock(parent)) selectedIndex - 1 else return null
+        }
+        else -> return null
+    }
+    if (blockIndex <= 0) return null
+    val block = path[blockIndex]
+    val container = path[blockIndex - 1]
+    val siblings = container.children
+    val index = siblings.indexOfFirst { it.id == block.id }
+    if (index < 0) return null
+    val insertAt = when (action) {
+        LayerAction.FORWARD -> siblings.getOrNull(index + 1)?.endIndex?.plus(1)
+        LayerAction.BACKWARD -> siblings.getOrNull(index - 1)?.startIndex
+        LayerAction.TO_FRONT -> siblings.lastOrNull()?.takeIf { it.id != block.id }?.endIndex?.plus(1)
+        LayerAction.TO_BACK -> siblings.firstOrNull()?.takeIf { it.id != block.id }?.startIndex
+    } ?: return null
+    return LayerMove(requireNotNull(block.stream), block.startIndex, block.endIndex, insertAt)
+}
+
+private fun isSafeLayerBlock(node: DrawNode): Boolean {
+    val stream = node.stream ?: return false
+    if (node.kind != NodeKind.GROUP || stream.owner !is StreamOwner.Page) return false
+    val open = stream.tokens.getOrNull(node.startIndex) as? Operator
+    val close = stream.tokens.getOrNull(node.endIndex) as? Operator
+    return open?.name == "q" && close?.name == "Q"
+}
+
 class EditTarget(
     val node: DrawNode,
     val caps: EditCaps,
@@ -1059,6 +1685,7 @@ data class PdfUiState(
     val page: ParsedPage? = null,
     val pageTransform: PageTransform? = null,
     val selectedId: Int? = null,
+    val selectedIds: Set<Int> = emptySet(),
     val editingId: Int? = null,
     val swatchColors: Map<Int, Int> = emptyMap(),
     val revealTick: Int = 0,
@@ -1067,6 +1694,7 @@ data class PdfUiState(
     val dirty: Boolean = false,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
+    val hasElementClipboard: Boolean = false,
     val documentToken: Int = 0,
     val fontCatalogTick: Int = 0,
     val error: String? = null,

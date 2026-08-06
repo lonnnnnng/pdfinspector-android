@@ -2,8 +2,8 @@ package com.loooong.reader.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -40,11 +40,14 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import compose.icons.TablerIcons
+import compose.icons.tablericons.AdjustmentsHorizontal
 import compose.icons.tablericons.Code
 import compose.icons.tablericons.Braces
 import compose.icons.tablericons.ChevronRight
@@ -58,6 +61,8 @@ import compose.icons.tablericons.Photo
 import compose.icons.tablericons.Trash
 import compose.icons.tablericons.VectorBeizer
 import com.loooong.reader.engine.DrawNode
+import com.loooong.reader.engine.AlignmentAction
+import com.loooong.reader.engine.LayerAction
 import com.loooong.reader.engine.NodeKind
 import com.loooong.reader.engine.ParsedPage
 import java.util.Locale
@@ -74,6 +79,7 @@ fun InspectorPane(
     page: ParsedPage,
     expanded: Set<Int>,
     selectedId: Int?,
+    selectedIds: Set<Int>,
     swatchColors: Map<Int, Int>,
     revealTick: Int,
     showRaw: Boolean,
@@ -82,12 +88,15 @@ fun InspectorPane(
     transparent: Boolean,
     canDockSide: Boolean,
     onSelect: (Int) -> Unit,
+    onToggleSelect: (Int) -> Unit,
     onToggleExpand: (Int) -> Unit,
     onToggleRaw: () -> Unit,
     onToggleDock: () -> Unit,
     onToggleTransparent: () -> Unit,
     onDelete: () -> Unit,
     onEdit: (Int) -> Unit,
+    onAlign: (AlignmentAction) -> Unit,
+    onReorder: (LayerAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxWidth()) {
@@ -98,6 +107,7 @@ fun InspectorPane(
         ) {
             val compactHeader = maxWidth < 360.dp
             var menuExpanded by remember { mutableStateOf(false) }
+            var layoutMenuExpanded by remember { mutableStateOf(false) }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -113,7 +123,7 @@ fun InspectorPane(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        "${page.leaves.size} 个元素",
+                        if (selectedIds.isEmpty()) "${page.leaves.size} 个元素" else "${page.leaves.size} 个元素 · 已选 ${selectedIds.size}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -189,6 +199,41 @@ fun InspectorPane(
                         Icon(TablerIcons.Droplet, "切换透明模式", Modifier.size(20.dp))
                     }
                 }
+                Box {
+                    IconButton(
+                        onClick = { layoutMenuExpanded = true },
+                        enabled = selectedIds.size >= 1,
+                    ) {
+                        Icon(TablerIcons.AdjustmentsHorizontal, "对齐与图层", Modifier.size(20.dp))
+                    }
+                    DropdownMenu(
+                        expanded = layoutMenuExpanded,
+                        onDismissRequest = { layoutMenuExpanded = false },
+                    ) {
+                        fun align(action: AlignmentAction) {
+                            layoutMenuExpanded = false
+                            onAlign(action)
+                        }
+                        fun layer(action: LayerAction) {
+                            layoutMenuExpanded = false
+                            onReorder(action)
+                        }
+                        DropdownMenuItem(text = { Text("左对齐") }, enabled = selectedIds.size >= 2, onClick = { align(AlignmentAction.LEFT) })
+                        DropdownMenuItem(text = { Text("水平居中") }, enabled = selectedIds.size >= 2, onClick = { align(AlignmentAction.HORIZONTAL_CENTER) })
+                        DropdownMenuItem(text = { Text("右对齐") }, enabled = selectedIds.size >= 2, onClick = { align(AlignmentAction.RIGHT) })
+                        DropdownMenuItem(text = { Text("顶对齐") }, enabled = selectedIds.size >= 2, onClick = { align(AlignmentAction.TOP) })
+                        DropdownMenuItem(text = { Text("垂直居中") }, enabled = selectedIds.size >= 2, onClick = { align(AlignmentAction.VERTICAL_CENTER) })
+                        DropdownMenuItem(text = { Text("底对齐") }, enabled = selectedIds.size >= 2, onClick = { align(AlignmentAction.BOTTOM) })
+                        DropdownMenuItem(text = { Text("水平等距") }, enabled = selectedIds.size >= 3, onClick = { align(AlignmentAction.DISTRIBUTE_HORIZONTAL) })
+                        DropdownMenuItem(text = { Text("垂直等距") }, enabled = selectedIds.size >= 3, onClick = { align(AlignmentAction.DISTRIBUTE_VERTICAL) })
+                        if (selectedIds.size == 1) {
+                            DropdownMenuItem(text = { Text("上移一层") }, onClick = { layer(LayerAction.FORWARD) })
+                            DropdownMenuItem(text = { Text("下移一层") }, onClick = { layer(LayerAction.BACKWARD) })
+                            DropdownMenuItem(text = { Text("置于顶层") }, onClick = { layer(LayerAction.TO_FRONT) })
+                            DropdownMenuItem(text = { Text("置于底层") }, onClick = { layer(LayerAction.TO_BACK) })
+                        }
+                    }
+                }
                 FilledTonalIconButton(
                     onClick = onDelete,
                     enabled = canDelete,
@@ -214,7 +259,16 @@ fun InspectorPane(
         LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
             items(rows, key = { it.node.id }) { row ->
                 val swatch = swatchColors[row.node.id] ?: row.node.colorArgb
-                TreeRowItem(row, row.node.id == selectedId, showRaw, swatch, onSelect, onToggleExpand, onEdit)
+                TreeRowItem(
+                    row = row,
+                    selected = row.node.id in selectedIds,
+                    showRaw = showRaw,
+                    swatchColor = swatch,
+                    onSelect = onSelect,
+                    onToggleSelect = onToggleSelect,
+                    onToggleExpand = onToggleExpand,
+                    onEdit = onEdit,
+                )
             }
         }
     }
@@ -235,12 +289,14 @@ private fun flatten(root: DrawNode, expanded: Set<Int>): List<TreeRow> {
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun TreeRowItem(
     row: TreeRow,
     selected: Boolean,
     showRaw: Boolean,
     swatchColor: Int?,
     onSelect: (Int) -> Unit,
+    onToggleSelect: (Int) -> Unit,
     onToggleExpand: (Int) -> Unit,
     onEdit: (Int) -> Unit,
 ) {
@@ -273,11 +329,14 @@ private fun TreeRowItem(
             modifier = Modifier
                 .weight(1f)
                 .padding(start = (4 + row.depth * 16).dp)
-                .selectable(
-                    selected = selected,
+                .combinedClickable(
                     onClick = { onSelect(node.id) },
-                    role = Role.Tab,
-                ),
+                    onLongClick = if (node.kind == NodeKind.GROUP) null else ({ onToggleSelect(node.id) }),
+                )
+                .semantics {
+                    this.selected = selected
+                    role = Role.Tab
+                },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             KindBadge(node.kind)

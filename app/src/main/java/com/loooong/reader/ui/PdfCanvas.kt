@@ -45,7 +45,7 @@ fun PdfCanvas(
     scaleState: MutableState<Float>,
     offsetState: MutableState<Offset>,
     leaves: List<LeafRect>,
-    selectedRect: Rect?,
+    selectedRects: List<Rect>,
     highlightColor: Color,
     backdropColor: Color,
     runBoxes: List<LeafRect>,
@@ -56,6 +56,7 @@ fun PdfCanvas(
     fitMode: FitMode,
     onUserTransform: () -> Unit,
     onSelect: (Int?) -> Unit,
+    onToggleSelect: (Int) -> Unit,
     renderTile: (suspend (pageIndex: Int, src: Rect, outW: Int, outH: Int) -> ImageBitmap?)? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -146,16 +147,23 @@ fun PdfCanvas(
                     }
                 }
                 .pointerInput(bitmap, leaves, runBoxes) {
-                    detectTapGestures { tap ->
-                        val point = Offset((tap.x - offset.x) / scale, (tap.y - offset.y) / scale)
-                        val run = runBoxes.lastOrNull { it.rect.contains(point) }
-                        if (run != null) {
-                            onEditRun(run.id)
-                        } else {
-                            val hit = leaves.lastOrNull { it.rect.contains(point) }
-                            onSelect(hit?.id)
-                        }
-                    }
+                    detectTapGestures(
+                        onTap = { tap ->
+                            val point = Offset((tap.x - offset.x) / scale, (tap.y - offset.y) / scale)
+                            onSelect(leaves.lastOrNull { it.rect.contains(point) }?.id)
+                        },
+                        onLongPress = { tap ->
+                            // long: 长按切换对象多选，普通单击仍保持快速单选和空白处取消选择。
+                            val point = Offset((tap.x - offset.x) / scale, (tap.y - offset.y) / scale)
+                            leaves.lastOrNull { it.rect.contains(point) }?.let { onToggleSelect(it.id) }
+                        },
+                        onDoubleTap = { tap ->
+                            // long: 单击保留给对象选择和变换，双击文字才进入改字，避免文本对象无法直接移动。
+                            val point = Offset((tap.x - offset.x) / scale, (tap.y - offset.y) / scale)
+                            val run = runBoxes.lastOrNull { it.rect.contains(point) }
+                            if (run != null) onEditRun(run.id)
+                        },
+                    )
                 },
         ) {
             drawRect(color = backdropColor, size = size)
@@ -195,7 +203,7 @@ fun PdfCanvas(
                         style = Stroke(width = runStroke),
                     )
                 }
-                selectedRect?.let { r ->
+                selectedRects.forEach { r ->
                     drawRect(color = highlightColor.copy(alpha = 0.18f), topLeft = r.topLeft, size = r.size)
                     drawRect(
                         color = highlightColor,

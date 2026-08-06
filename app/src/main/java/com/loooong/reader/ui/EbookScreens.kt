@@ -41,6 +41,8 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -77,6 +79,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.semantics.Role
@@ -102,8 +105,10 @@ import compose.icons.tablericons.Bookmarks
 import compose.icons.tablericons.ChevronLeft
 import compose.icons.tablericons.ChevronRight
 import compose.icons.tablericons.CloudDownload
+import compose.icons.tablericons.DotsVertical
 import compose.icons.tablericons.FileText
 import compose.icons.tablericons.Maximize
+import compose.icons.tablericons.Minimize
 import compose.icons.tablericons.Search
 import compose.icons.tablericons.Settings
 import compose.icons.tablericons.Trash
@@ -484,6 +489,7 @@ private fun TxtReaderScreen(
     onToggleFullscreen: () -> Unit,
     onBack: () -> Unit,
 ) {
+    val compactToolbar = LocalConfiguration.current.screenWidthDp < 360
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = viewModel.currentTxtPosition(document).coerceIn(
             0,
@@ -552,21 +558,13 @@ private fun TxtReaderScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = { panel = TxtPanel.SEARCH }) {
-                            Icon(TablerIcons.Search, contentDescription = "搜索正文")
-                        }
-                        IconButton(onClick = { panel = TxtPanel.TOC }) {
-                            Icon(TablerIcons.Bookmarks, contentDescription = "打开目录")
-                        }
-                        IconButton(onClick = { panel = TxtPanel.SETTINGS }) {
-                            Icon(TablerIcons.Settings, contentDescription = "阅读设置")
-                        }
-                        IconButton(onClick = onToggleFullscreen) {
-                            Icon(
-                                TablerIcons.Maximize,
-                                contentDescription = "进入全屏",
-                            )
-                        }
+                        EbookReaderToolbarActions(
+                            compact = compactToolbar,
+                            onSearch = { panel = TxtPanel.SEARCH },
+                            onToc = { panel = TxtPanel.TOC },
+                            onSettings = { panel = TxtPanel.SETTINGS },
+                            onToggleFullscreen = onToggleFullscreen,
+                        )
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = readerBackground,
@@ -617,29 +615,41 @@ private fun TxtReaderScreen(
             },
         ) { innerPadding ->
             // long: Android 12+ 默认拉伸滚动边界；阅读正文到底后应保持稳定，但仍保留正常滚动和惯性。
-            CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize().padding(innerPadding),
-                    contentPadding = PaddingValues(
-                        horizontal = viewModel.settings.horizontalPaddingDp.dp,
-                        vertical = 22.dp,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    itemsIndexed(document.paragraphs, key = { index, _ -> index }) { _, paragraph ->
-                        SelectionContainer {
-                            Text(
-                                text = paragraph,
-                                style = TextStyle(
-                                    fontSize = viewModel.settings.fontSizeSp.sp,
-                                    lineHeight = (viewModel.settings.fontSizeSp * viewModel.settings.lineHeight).sp,
-                                    color = readerForeground,
-                                ),
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+            ) {
+                CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            horizontal = viewModel.settings.horizontalPaddingDp.dp,
+                            vertical = 22.dp,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        itemsIndexed(document.paragraphs, key = { index, _ -> index }) { _, paragraph ->
+                            SelectionContainer {
+                                Text(
+                                    text = paragraph,
+                                    style = TextStyle(
+                                        fontSize = viewModel.settings.fontSizeSp.sp,
+                                        lineHeight = (viewModel.settings.fontSizeSp * viewModel.settings.lineHeight).sp,
+                                        color = readerForeground,
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
                         }
                     }
+                }
+                if (fullscreen) {
+                    EbookFullscreenExitButton(
+                        modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+                        onClick = onToggleFullscreen,
+                    )
                 }
             }
         }
@@ -693,6 +703,7 @@ private fun EpubReaderScreen(
     onToggleFullscreen: () -> Unit,
     onBack: () -> Unit,
 ) {
+    val compactToolbar = LocalConfiguration.current.screenWidthDp < 360
     val activity = LocalContext.current as? FragmentActivity
     val containerId = remember { com.loooong.reader.R.id.epub_navigator_container }
     var navigator by remember(document.sourceId) { mutableStateOf<EpubNavigatorFragment?>(null) }
@@ -822,18 +833,13 @@ private fun EpubReaderScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = { panel = EpubPanel.SEARCH }) {
-                            Icon(TablerIcons.Search, contentDescription = "搜索正文")
-                        }
-                        IconButton(onClick = { panel = EpubPanel.TOC }) {
-                            Icon(TablerIcons.Bookmarks, contentDescription = "打开目录")
-                        }
-                        IconButton(onClick = { panel = EpubPanel.SETTINGS }) {
-                            Icon(TablerIcons.Settings, contentDescription = "阅读设置")
-                        }
-                        IconButton(onClick = onToggleFullscreen) {
-                            Icon(TablerIcons.Maximize, contentDescription = "进入全屏")
-                        }
+                        EbookReaderToolbarActions(
+                            compact = compactToolbar,
+                            onSearch = { panel = EpubPanel.SEARCH },
+                            onToc = { panel = EpubPanel.TOC },
+                            onSettings = { panel = EpubPanel.SETTINGS },
+                            onToggleFullscreen = onToggleFullscreen,
+                        )
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = readerBackground,
@@ -958,6 +964,12 @@ private fun EpubReaderScreen(
                         )
                     }
                 }
+                if (fullscreen) {
+                    EbookFullscreenExitButton(
+                        modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+                        onClick = onToggleFullscreen,
+                    )
+                }
             }
         }
     }
@@ -996,6 +1008,83 @@ private fun EpubReaderScreen(
 }
 
 private enum class EpubPanel { SEARCH, TOC, SETTINGS }
+
+@Composable
+private fun EbookReaderToolbarActions(
+    compact: Boolean,
+    onSearch: () -> Unit,
+    onToc: () -> Unit,
+    onSettings: () -> Unit,
+    onToggleFullscreen: () -> Unit,
+) {
+    IconButton(onClick = onSearch) {
+        Icon(TablerIcons.Search, contentDescription = "搜索正文")
+    }
+    if (compact) {
+        var menuExpanded by remember { mutableStateOf(false) }
+        Box {
+            IconButton(onClick = { menuExpanded = true }) {
+                Icon(TablerIcons.DotsVertical, contentDescription = "更多阅读操作")
+            }
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { menuExpanded = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("打开目录") },
+                    leadingIcon = { Icon(TablerIcons.Bookmarks, contentDescription = null) },
+                    onClick = {
+                        menuExpanded = false
+                        onToc()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("阅读设置") },
+                    leadingIcon = { Icon(TablerIcons.Settings, contentDescription = null) },
+                    onClick = {
+                        menuExpanded = false
+                        onSettings()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("进入全屏") },
+                    leadingIcon = { Icon(TablerIcons.Maximize, contentDescription = null) },
+                    onClick = {
+                        menuExpanded = false
+                        onToggleFullscreen()
+                    },
+                )
+            }
+        }
+    } else {
+        IconButton(onClick = onToc) {
+            Icon(TablerIcons.Bookmarks, contentDescription = "打开目录")
+        }
+        IconButton(onClick = onSettings) {
+            Icon(TablerIcons.Settings, contentDescription = "阅读设置")
+        }
+        IconButton(onClick = onToggleFullscreen) {
+            Icon(TablerIcons.Maximize, contentDescription = "进入全屏")
+        }
+    }
+}
+
+@Composable
+private fun EbookFullscreenExitButton(
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+        tonalElevation = 3.dp,
+    ) {
+        IconButton(onClick = onClick) {
+            Icon(TablerIcons.Minimize, contentDescription = "退出全屏")
+        }
+    }
+}
 
 @Composable
 private fun ReaderSurface(settings: EbookReaderSettings, content: @Composable () -> Unit) {

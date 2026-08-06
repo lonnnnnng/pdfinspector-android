@@ -1,5 +1,9 @@
 package com.loooong.reader.engine
 
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
+
 // 2D affine transform matching a PDF matrix [a b c d e f]; row-vector convention.
 class Affine(
     val a: Float,
@@ -37,10 +41,20 @@ class Affine(
         val IDENTITY = Affine(1f, 0f, 0f, 1f, 0f, 0f)
         fun translate(tx: Float, ty: Float) = Affine(1f, 0f, 0f, 1f, tx, ty)
         fun scale(sx: Float, sy: Float) = Affine(sx, 0f, 0f, sy, 0f, 0f)
+        fun rotate(degrees: Float): Affine {
+            val radians = degrees * PI.toFloat() / 180f
+            val cosine = cos(radians)
+            val sine = sin(radians)
+            return Affine(cosine, sine, -sine, cosine, 0f, 0f)
+        }
 
         // Page-space transform that scales about an anchor, keeping it fixed.
         fun scaleAbout(sx: Float, sy: Float, ax: Float, ay: Float): Affine =
             translate(-ax, -ay).then(scale(sx, sy)).then(translate(ax, ay))
+
+        // long: 旋转以 PDF 页面坐标中的对象中心为锚点，避免对象绕页面原点大范围漂移。
+        fun rotateAbout(degrees: Float, ax: Float, ay: Float): Affine =
+            translate(-ax, -ay).then(rotate(degrees)).then(translate(ax, ay))
     }
 }
 

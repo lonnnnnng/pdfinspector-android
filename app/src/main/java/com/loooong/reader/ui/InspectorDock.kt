@@ -93,7 +93,9 @@ private fun ResizeHandle(dock: Dock, sizeDp: Dp, onResizePx: (Float) -> Unit) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(40.dp)
+                // long: 扩大拖拽命中区并保留独立语义，避免小屏上必须精确点中细线才能调整面板。
+                .height(48.dp)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f))
                 .then(resizeSemantics)
                 .pointerInput(Unit) {
                     detectVerticalDragGestures { change, dy ->
@@ -103,13 +105,15 @@ private fun ResizeHandle(dock: Dock, sizeDp: Dp, onResizePx: (Float) -> Unit) {
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Box(Modifier.size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(grip))
+            Box(Modifier.size(width = 40.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(grip))
         }
     } else {
         Box(
             modifier = Modifier
                 .fillMaxHeight()
-                .width(40.dp)
+                // long: 侧停靠模式同样保持 48dp 命中宽度，避免拖拽与画布手势互相抢焦点。
+                .width(48.dp)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f))
                 .then(resizeSemantics)
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures { change, dx ->
@@ -119,7 +123,7 @@ private fun ResizeHandle(dock: Dock, sizeDp: Dp, onResizePx: (Float) -> Unit) {
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Box(Modifier.size(width = 4.dp, height = 36.dp).clip(RoundedCornerShape(2.dp)).background(grip))
+            Box(Modifier.size(width = 4.dp, height = 40.dp).clip(RoundedCornerShape(2.dp)).background(grip))
         }
     }
 }

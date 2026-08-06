@@ -43,6 +43,7 @@ import compose.icons.tablericons.Dots
 import compose.icons.tablericons.Folder
 import compose.icons.tablericons.Maximize
 import compose.icons.tablericons.Minimize
+import compose.icons.tablericons.Plus
 import compose.icons.tablericons.Settings
 
 @Composable
@@ -54,8 +55,13 @@ fun InspectorToolbar(
     dirty: Boolean,
     canUndo: Boolean,
     canRedo: Boolean,
-    copyText: String?,
-    onCopyText: () -> Unit,
+    canCopy: Boolean,
+    onCopyElement: () -> Unit,
+    canPasteElement: Boolean,
+    onPasteElement: () -> Unit,
+    onPasteText: () -> Unit,
+    onInsertText: () -> Unit,
+    onInsertImage: () -> Unit,
     onFitWidth: () -> Unit,
     onFitHeight: () -> Unit,
     onToggleFullscreen: () -> Unit,
@@ -102,8 +108,13 @@ fun InspectorToolbar(
                     dirty = dirty,
                     canUndo = canUndo,
                     canRedo = canRedo,
-                    canCopy = copyText != null,
-                    onCopyText = onCopyText,
+                    canCopy = canCopy,
+                    onCopyElement = onCopyElement,
+                    canPasteElement = canPasteElement,
+                    onPasteElement = onPasteElement,
+                    onPasteText = onPasteText,
+                    onInsertText = onInsertText,
+                    onInsertImage = onInsertImage,
                     onFitWidth = onFitWidth,
                     onFitHeight = onFitHeight,
                     onToggleFullscreen = onToggleFullscreen,
@@ -130,7 +141,12 @@ private fun ToolbarActions(
     canUndo: Boolean,
     canRedo: Boolean,
     canCopy: Boolean,
-    onCopyText: () -> Unit,
+    onCopyElement: () -> Unit,
+    canPasteElement: Boolean,
+    onPasteElement: () -> Unit,
+    onPasteText: () -> Unit,
+    onInsertText: () -> Unit,
+    onInsertImage: () -> Unit,
     onFitWidth: () -> Unit,
     onFitHeight: () -> Unit,
     onToggleFullscreen: () -> Unit,
@@ -151,7 +167,12 @@ private fun ToolbarActions(
             canUndo = canUndo,
             canRedo = canRedo,
             canCopy = canCopy,
-            onCopyText = onCopyText,
+            onCopyElement = onCopyElement,
+            canPasteElement = canPasteElement,
+            onPasteElement = onPasteElement,
+            onPasteText = onPasteText,
+            onInsertText = onInsertText,
+            onInsertImage = onInsertImage,
             onFitWidth = onFitWidth,
             onFitHeight = onFitHeight,
             onToggleFullscreen = onToggleFullscreen,
@@ -171,10 +192,17 @@ private fun ToolbarActions(
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         if (canCopy) {
-            IconButton(onClick = onCopyText) {
-                Icon(TablerIcons.Copy, "复制文本", Modifier.size(20.dp))
+            IconButton(onClick = onCopyElement) {
+                Icon(TablerIcons.Copy, "复制元素", Modifier.size(20.dp))
             }
         }
+        InsertMenuButton(
+            canPasteElement = canPasteElement,
+            onPasteElement = onPasteElement,
+            onPasteText = onPasteText,
+            onInsertText = onInsertText,
+            onInsertImage = onInsertImage,
+        )
         IconButton(
             onClick = onSave,
             enabled = dirty,
@@ -226,7 +254,12 @@ private fun CompactToolbarActions(
     canUndo: Boolean,
     canRedo: Boolean,
     canCopy: Boolean,
-    onCopyText: () -> Unit,
+    onCopyElement: () -> Unit,
+    canPasteElement: Boolean,
+    onPasteElement: () -> Unit,
+    onPasteText: () -> Unit,
+    onInsertText: () -> Unit,
+    onInsertImage: () -> Unit,
     onFitWidth: () -> Unit,
     onFitHeight: () -> Unit,
     onToggleFullscreen: () -> Unit,
@@ -265,8 +298,14 @@ private fun CompactToolbarActions(
                 }
                 DropdownMenuItem(text = { Text("打开 PDF") }, onClick = { run(onOpen) })
                 if (canCopy) {
-                    DropdownMenuItem(text = { Text("复制所选文本") }, onClick = { run(onCopyText) })
+                    DropdownMenuItem(text = { Text("复制所选元素") }, onClick = { run(onCopyElement) })
                 }
+                DropdownMenuItem(text = { Text("插入文本") }, onClick = { run(onInsertText) })
+                DropdownMenuItem(text = { Text("插入图片") }, onClick = { run(onInsertImage) })
+                if (canPasteElement) {
+                    DropdownMenuItem(text = { Text("粘贴元素") }, onClick = { run(onPasteElement) })
+                }
+                DropdownMenuItem(text = { Text("粘贴剪贴板文本") }, onClick = { run(onPasteText) })
                 DropdownMenuItem(text = { Text("撤销") }, enabled = canUndo, onClick = { run(onUndo) })
                 DropdownMenuItem(text = { Text("重做") }, enabled = canRedo, onClick = { run(onRedo) })
                 DropdownMenuItem(text = { Text("适合宽度") }, onClick = { run(onFitWidth) })
@@ -277,6 +316,34 @@ private fun CompactToolbarActions(
                 )
                 DropdownMenuItem(text = { Text("设置") }, onClick = { run(onSettings) })
             }
+        }
+    }
+}
+
+@Composable
+private fun InsertMenuButton(
+    canPasteElement: Boolean,
+    onPasteElement: () -> Unit,
+    onPasteText: () -> Unit,
+    onInsertText: () -> Unit,
+    onInsertImage: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(TablerIcons.Plus, "插入内容", Modifier.size(20.dp))
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            fun run(action: () -> Unit) {
+                expanded = false
+                action()
+            }
+            DropdownMenuItem(text = { Text("插入文本") }, onClick = { run(onInsertText) })
+            DropdownMenuItem(text = { Text("插入图片") }, onClick = { run(onInsertImage) })
+            if (canPasteElement) {
+                DropdownMenuItem(text = { Text("粘贴元素") }, onClick = { run(onPasteElement) })
+            }
+            DropdownMenuItem(text = { Text("粘贴剪贴板文本") }, onClick = { run(onPasteText) })
         }
     }
 }

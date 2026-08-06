@@ -15,19 +15,39 @@ import com.tom_roush.pdfbox.pdmodel.PDResources
 import com.tom_roush.pdfbox.pdmodel.common.PDStream
 import com.tom_roush.pdfbox.pdmodel.font.PDFont
 import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import kotlin.math.roundToInt
 
-// Page-space edit for one element: translate by dx,dy, scale by scaleX,scaleY
-// about the element's lower-left, recolor, and/or replace text.
+// long: 单个元素的页面空间编辑请求；默认以左下角缩放，画布直接操作可显式传入中心锚点并旋转。
 class EditRequest(
     val dx: Float = 0f,
     val dy: Float = 0f,
     val scaleX: Float = 1f,
     val scaleY: Float = 1f,
+    val rotationDegrees: Float = 0f,
+    val pivotX: Float? = null,
+    val pivotY: Float? = null,
     val fillArgb: Int? = null,
     val strokeArgb: Int? = null,
     val newText: String? = null,
     val fontEntryId: String? = null,
+)
+
+class TextInsertRequest(
+    val text: String,
+    val x: Float,
+    val y: Float,
+    val fontSize: Float,
+    val font: PDFont,
+    val fillArgb: Int,
+)
+
+class ImageInsertRequest(
+    val bytes: ByteArray,
+    val x: Float,
+    val y: Float,
+    val width: Float,
+    val height: Float,
 )
 
 // What the edit form may offer for a given node.
@@ -86,6 +106,122 @@ object ElementEditor {
         }
         writeStream(document, page, parsedStream, kept)
         return kept
+    }
+
+    /** long: 多选删除一次性重写页面流，避免多个节点删除时旧 token 索引逐次失效。 */
+    fun deleteNodes(document: PDDocument, page: PDPage, nodes: List<DrawNode>): EditResult {
+        if (nodes.isEmpty()) return EditResult.NoChange
+        val stream = nodes.first().stream ?: return EditResult.NoChange
+        if (stream.owner !is StreamOwner.Page || nodes.any { it.stream !== stream }) return EditResult.NoChange
+        val ranges = nodes.map { it.startIndex..it.endIndex }.sortedBy { it.first }
+        if (ranges.any { it.first < 0 || it.last >= stream.tokens.size } ||
+            ranges.zipWithNext().any { (left, right) -> left.last >= right.first }
+        ) {
+            return EditResult.NoChange
+        }
+        val kept = ArrayList<Any>(stream.tokens.size)
+        var rangeIndex = 0
+        for (index in stream.tokens.indices) {
+            while (rangeIndex < ranges.size && index > ranges[rangeIndex].last) rangeIndex++
+            if (rangeIndex >= ranges.size || index !in ranges[rangeIndex]) kept.add(stream.tokens[index])
+        }
+        writeStream(document, page, stream, kept)
+        return EditResult.Applied(kept)
+    }
+
+    fun insertText(
+        document: PDDocument,
+        page: PDPage,
+        tokens: List<Any>,
+        request: TextInsertRequest,
+    ): EditResult {
+        if (request.text.isEmpty() || request.fontSize <= 0f) return EditResult.NoChange
+        val lines = request.text.split('\n')
+        val encodedLines = try {
+            lines.map { request.font.encode(it) }
+        } catch (_: Exception) {
+            return EditResult.TextEncodeFailed(unsupportedChars(request.font, request.text))
+        }
+        val resources = copyPageResources(page)
+        val fontName = resources.add(request.font)
+        val out = ArrayList<Any>(tokens.size + 18)
+        out.addAll(tokens)
+        out.add(Operator.getOperator("q"))
+        out.add(Operator.getOperator("BT"))
+        out.add(fontName)
+        out.add(COSFloat(request.fontSize))
+        out.add(Operator.getOperator("Tf"))
+        out.add(COSFloat(request.fontSize))
+        out.add(Operator.getOperator("TL"))
+        appendColor(out, request.fillArgb, false)
+        out.add(COSFloat(1f)); out.add(COSFloat(0f));
+        out.add(COSFloat(0f)); out.add(COSFloat(1f))
+        out.add(COSFloat(request.x)); out.add(COSFloat(request.y))
+        out.add(Operator.getOperator("Tm"))
+        encodedLines.forEachIndexed { index, bytes ->
+            out.add(COSString(bytes))
+            out.add(Operator.getOperator("Tj"))
+            if (index != encodedLines.lastIndex) out.add(Operator.getOperator("T*"))
+        }
+        out.add(Operator.getOperator("ET"))
+        out.add(Operator.getOperator("Q"))
+        writeStream(document, page, ParsedStream(StreamOwner.Page(page), tokens, resources), out)
+        return EditResult.Applied(out)
+    }
+
+    fun insertImage(
+        document: PDDocument,
+        page: PDPage,
+        tokens: List<Any>,
+        request: ImageInsertRequest,
+    ): EditResult {
+        if (request.bytes.isEmpty() || request.width <= 0f || request.height <= 0f) {
+            return EditResult.NoChange
+        }
+        val image = PDImageXObject.createFromByteArray(document, request.bytes, "inserted-image")
+        val resources = copyPageResources(page)
+        val imageName = resources.add(image)
+        val out = ArrayList<Any>(tokens.size + 12)
+        out.addAll(tokens)
+        out.add(Operator.getOperator("q"))
+        out.add(COSFloat(request.width)); out.add(COSFloat(0f))
+        out.add(COSFloat(0f)); out.add(COSFloat(request.height))
+        out.add(COSFloat(request.x)); out.add(COSFloat(request.y))
+        out.add(Operator.getOperator("cm"))
+        out.add(imageName)
+        out.add(Operator.getOperator("Do"))
+        out.add(Operator.getOperator("Q"))
+        writeStream(document, page, ParsedStream(StreamOwner.Page(page), tokens, resources), out)
+        return EditResult.Applied(out)
+    }
+
+    /**
+     * long: 复制页面级路径、图片或完整文本对象时，重新绑定资源并以平移矩阵追加到内容流末尾。
+     * 文本运行（BT/ET 内的单个 Tj/TJ）不应被单独包在 q/Q 中，调用方需改走 insertText。
+     */
+    fun pasteNode(
+        document: PDDocument,
+        page: PDPage,
+        tokens: List<Any>,
+        copiedTokens: List<Any>,
+        sourceResources: PDResources?,
+        dx: Float,
+        dy: Float,
+    ): EditResult {
+        if (copiedTokens.isEmpty() || !dx.isFinite() || !dy.isFinite()) return EditResult.NoChange
+        val resources = copyPageResources(page)
+        val remapped = remapResourceNames(copiedTokens, sourceResources, resources)
+        val out = ArrayList<Any>(tokens.size + remapped.size + 12)
+        out.addAll(tokens)
+        out.add(Operator.getOperator("q"))
+        out.add(COSFloat(1f)); out.add(COSFloat(0f))
+        out.add(COSFloat(0f)); out.add(COSFloat(1f))
+        out.add(COSFloat(dx)); out.add(COSFloat(dy))
+        out.add(Operator.getOperator("cm"))
+        out.addAll(remapped)
+        out.add(Operator.getOperator("Q"))
+        writeStream(document, page, ParsedStream(StreamOwner.Page(page), tokens, resources), out)
+        return EditResult.Applied(out)
     }
 
     private fun writeStream(
@@ -195,6 +331,61 @@ object ElementEditor {
         return result
     }
 
+    /** long: 对齐操作按 token 起点倒序改写，所有节点完成后只写流一次，形成单一撤销事务。 */
+    fun editElements(
+        document: PDDocument,
+        page: PDPage,
+        edits: List<Pair<DrawNode, EditRequest>>,
+    ): EditResult {
+        if (edits.isEmpty()) return EditResult.NoChange
+        val source = edits.first().first.stream ?: return EditResult.NoChange
+        if (source.owner !is StreamOwner.Page || edits.any { it.first.stream !== source }) {
+            return EditResult.NoChange
+        }
+        var tokens = source.tokens
+        var changed = false
+        for ((node, request) in edits.sortedByDescending { it.first.startIndex }) {
+            val currentStream = ParsedStream(source.owner, tokens, source.resources, source.formPath)
+            when (val result = rebuild(tokens, node, request, currentStream, null, 1f)) {
+                is EditResult.Applied -> {
+                    tokens = result.tokens
+                    changed = true
+                }
+                EditResult.NoChange -> Unit
+                else -> return result
+            }
+        }
+        if (!changed) return EditResult.NoChange
+        writeStream(document, page, source, tokens)
+        return EditResult.Applied(tokens)
+    }
+
+    /** long: 只移动已经验证为自包含的 q/Q 区间，调用方负责给出同层目标插入位置。 */
+    fun reorderRange(
+        document: PDDocument,
+        page: PDPage,
+        stream: ParsedStream,
+        start: Int,
+        end: Int,
+        insertAt: Int,
+    ): EditResult {
+        if (stream.owner !is StreamOwner.Page || start !in stream.tokens.indices ||
+            end !in stream.tokens.indices || start > end || insertAt !in 0..stream.tokens.size
+        ) {
+            return EditResult.NoChange
+        }
+        if (insertAt in (start + 1)..(end + 1)) return EditResult.NoChange
+        val block = stream.tokens.subList(start, end + 1).toList()
+        val out = ArrayList<Any>(stream.tokens.size)
+        out.addAll(stream.tokens.subList(0, start))
+        out.addAll(stream.tokens.subList(end + 1, stream.tokens.size))
+        val adjusted = if (insertAt > end) insertAt - block.size else insertAt
+        if (adjusted !in 0..out.size || adjusted == start) return EditResult.NoChange
+        out.addAll(adjusted, block)
+        writeStream(document, page, stream, out)
+        return EditResult.Applied(out)
+    }
+
     fun editElement(
         document: PDDocument,
         page: PDPage,
@@ -227,7 +418,7 @@ object ElementEditor {
 
         val wrappable = node.kind == NodeKind.PATH || node.kind == NodeKind.IMAGE || textObject
         val wantsGeom = request.dx != 0f || request.dy != 0f ||
-            request.scaleX != 1f || request.scaleY != 1f
+            request.scaleX != 1f || request.scaleY != 1f || request.rotationDegrees != 0f
         val wantsColor = request.fillArgb != null || request.strokeArgb != null
         if (!wrappable || (!wantsGeom && !wantsColor)) return EditResult.NoChange
 
@@ -237,7 +428,10 @@ object ElementEditor {
             val m = node.ctm ?: return EditResult.Degenerate
             val b = node.bounds ?: return EditResult.Degenerate
             val inv = m.inverse() ?: return EditResult.Degenerate
-            val t = Affine.scaleAbout(request.scaleX, request.scaleY, b.minX, b.minY)
+            val pivotX = request.pivotX ?: b.minX
+            val pivotY = request.pivotY ?: b.minY
+            val t = Affine.scaleAbout(request.scaleX, request.scaleY, pivotX, pivotY)
+                .then(Affine.rotateAbout(request.rotationDegrees, pivotX, pivotY))
                 .then(Affine.translate(request.dx, request.dy))
             val c = m.then(t).then(inv)
             prefix.add(COSFloat(c.a)); prefix.add(COSFloat(c.b)); prefix.add(COSFloat(c.c))
@@ -402,6 +596,58 @@ object ElementEditor {
         return PDResources(copiedDictionary).also { setResources(stream.owner, it) }
     }
 
+    private fun copyPageResources(page: PDPage): PDResources {
+        val inherited = page.resources
+        val copiedDictionary = if (inherited == null) {
+            COSDictionary()
+        } else {
+            COSDictionary(inherited.cosObject).apply {
+                listOf(COSName.FONT, COSName.XOBJECT).forEach { key ->
+                    (inherited.cosObject.getDictionaryObject(key) as? COSDictionary)
+                        ?.let { setItem(key, COSDictionary(it)) }
+                }
+            }
+        }
+        return PDResources(copiedDictionary).also { page.resources = it }
+    }
+
+    private fun remapResourceNames(
+        copiedTokens: List<Any>,
+        sourceResources: PDResources?,
+        targetResources: PDResources,
+    ): List<Any> {
+        if (sourceResources == null) return copiedTokens
+        val names = HashMap<String, COSName>()
+        val out = ArrayList<Any>(copiedTokens.size)
+        for (i in copiedTokens.indices) {
+            val token = copiedTokens[i]
+            if (token is COSName && i + 1 < copiedTokens.size) {
+                val op = copiedTokens[i + 1] as? Operator
+                val mapped = when (op?.name) {
+                    "Tf" -> runCatching { sourceResources.getFont(token) }
+                        .getOrNull()?.let { sourceFont ->
+                            names.getOrPut(token.name) { targetResources.add(sourceFont) }
+                        }
+                    "Do" -> runCatching { sourceResources.getXObject(token) }
+                        .getOrNull()?.let { xObject ->
+                            names.getOrPut(token.name) {
+                                when (xObject) {
+                                    is PDImageXObject -> targetResources.add(xObject)
+                                    is PDFormXObject -> targetResources.add(xObject)
+                                    else -> token
+                                }
+                            }
+                        }
+                    else -> null
+                }
+                out.add(mapped ?: token)
+            } else {
+                out.add(token)
+            }
+        }
+        return out
+    }
+
     // Reuses an already-added resource when the same font is applied to several
     // runs, so repeated edits don't pile up duplicate /Font entries.
     private fun ensureFontResource(resources: PDResources, font: PDFont): COSName {
@@ -458,6 +704,7 @@ object ElementEditor {
         clearContentsFlag(page.cosObject.getDictionaryObject(COSName.CONTENTS))
         page.setContents(stream)
         stream.cosObject.setNeedToBeUpdated(true)
+        markResources(page.resources)
         markPageChain(document, page)
     }
 
